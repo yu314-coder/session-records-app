@@ -1,0 +1,27 @@
+{
+  "name": "session-records-app",
+  "version": "1.0.0",
+  "description": "Session Records Management System with Notion integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@notionhq/client": "^2.2.13",
+    "bcrypt": "^5.1.1",
+    "express-session": "^1.17.3",
+    "body-parser": "^1.20.2",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
