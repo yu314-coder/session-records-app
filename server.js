@@ -1,6 +1,5 @@
 const express = require('express');
 const multer = require('multer');
-const bcrypt = require('bcrypt');
 const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
@@ -102,18 +101,15 @@ app.post('/api/register', async (req, res) => {
       return res.json({ success: false, message: 'UserID already registered' });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create user in Notion
+    // Create user in Notion (store plain text password)
     await notion.pages.create({
       parent: { database_id: USERS_DB_ID },
       properties: {
-        'UserID': {
+        'Name': {
           title: [{ text: { content: userID } }]
         },
         'Password': {
-          rich_text: [{ text: { content: hashedPassword } }]
+          rich_text: [{ text: { content: password } }]  // Store plain text password
         }
       },
     });
@@ -138,7 +134,7 @@ app.post('/api/login', async (req, res) => {
     const users = await notion.databases.query({
       database_id: USERS_DB_ID,
       filter: {
-        property: 'UserID',
+        property: 'Name',
         title: {
           equals: userID,
         },
@@ -150,12 +146,10 @@ app.post('/api/login', async (req, res) => {
     }
 
     const user = users.results[0];
-    const hashedPassword = user.properties.Password.rich_text[0]?.text?.content;
+    const storedPassword = user.properties.Password.rich_text[0]?.text?.content;
 
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, hashedPassword);
-
-    if (isValidPassword) {
+    // Compare plain text passwords
+    if (storedPassword === password) {
       req.session.userID = userID;
       res.json({ success: true, message: 'Success' });
     } else {
@@ -180,7 +174,7 @@ app.post('/api/check-access-code', async (req, res) => {
     const codes = await notion.databases.query({
       database_id: ACCESS_CODES_DB_ID,
       filter: {
-        property: 'AccessCode',
+        property: 'Name',
         title: {
           equals: accessCode,
         },
@@ -199,47 +193,6 @@ app.post('/api/check-access-code', async (req, res) => {
   }
 });
 
-// Save access code (admin function)
-app.post('/api/save-access-code', async (req, res) => {
-  try {
-    const { accessCode } = req.body;
-
-    if (!accessCode) {
-      return res.json({ success: false, message: 'Access code is required' });
-    }
-
-    // Check if access code already exists
-    const existingCodes = await notion.databases.query({
-      database_id: ACCESS_CODES_DB_ID,
-      filter: {
-        property: 'AccessCode',
-        title: {
-          equals: accessCode,
-        },
-      },
-    });
-
-    if (existingCodes.results.length > 0) {
-      return res.json({ success: false, message: 'Access Code already exists' });
-    }
-
-    // Create access code in Notion
-    await notion.pages.create({
-      parent: { database_id: ACCESS_CODES_DB_ID },
-      properties: {
-        'AccessCode': {
-          title: [{ text: { content: accessCode } }]
-        }
-      },
-    });
-
-    res.json({ success: true, message: 'Access Code saved' });
-  } catch (error) {
-    console.error('Save access code error:', error);
-    res.json({ success: false, message: 'Failed to save access code' });
-  }
-});
-
 // Add record
 app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
   try {
@@ -255,6 +208,9 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
     await notion.pages.create({
       parent: { database_id: RECORDS_DB_ID },
       properties: {
+        'Name': {
+          title: [{ text: { content: `Record-${Date.now()}` } }]
+        },
         'ID': {
           number: Date.now()
         },
@@ -346,6 +302,9 @@ app.post('/api/clear-records', async (req, res) => {
     await notion.pages.create({
       parent: { database_id: RECORDS_DB_ID },
       properties: {
+        'Name': {
+          title: [{ text: { content: `Cleared-${Date.now()}` } }]
+        },
         'ID': {
           number: Date.now()
         },
@@ -384,7 +343,7 @@ async function updateCounts(department) {
     const counts = await notion.databases.query({
       database_id: COUNTS_DB_ID,
       filter: {
-        property: 'Department',
+        property: 'Name',
         title: {
           equals: department,
         },
@@ -409,7 +368,7 @@ async function updateCounts(department) {
       await notion.pages.create({
         parent: { database_id: COUNTS_DB_ID },
         properties: {
-          'Department': {
+          'Name': {
             title: [{ text: { content: department } }]
           },
           'Count': {
