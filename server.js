@@ -285,6 +285,17 @@ app.post('/api/clear-records', async (req, res) => {
       return res.json({ success: false, message: 'Not authenticated' });
     }
 
+    const { adminPassword } = req.body;
+
+    // Check admin password
+    if (!adminPassword) {
+      return res.json({ success: false, message: 'Admin password required' });
+    }
+
+    if (adminPassword !== process.env.ADMIN_PASSWORD) {
+      return res.json({ success: false, message: 'Invalid admin password' });
+    }
+
     // Get all records
     const records = await notion.databases.query({
       database_id: RECORDS_DB_ID,
@@ -321,7 +332,7 @@ app.post('/api/clear-records', async (req, res) => {
           rich_text: [{ text: { content: '' } }]
         },
         'SyllabusText': {
-          rich_text: [{ text: { content: `Cleared by ${req.session.userID}` } }]
+          rich_text: [{ text: { content: `Cleared by ${req.session.userID} with admin password` } }]
         }
       },
     });
@@ -329,7 +340,7 @@ app.post('/api/clear-records', async (req, res) => {
     // Clear counts
     await clearCounts();
 
-    res.json({ success: true, message: 'All records cleared' });
+    res.json({ success: true, message: 'All records cleared successfully' });
   } catch (error) {
     console.error('Clear records error:', error);
     res.json({ success: false, message: 'Failed to clear records' });
