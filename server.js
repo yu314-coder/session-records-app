@@ -77,6 +77,42 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Debug endpoint to check database schema
+app.get('/api/debug-database', async (req, res) => {
+  try {
+    console.log('Checking database schema...');
+    
+    // Get Users database info
+    const usersDb = await notion.databases.retrieve({ database_id: USERS_DB_ID });
+    console.log('Users Database Properties:', Object.keys(usersDb.properties));
+    
+    // Get Records database info  
+    const recordsDb = await notion.databases.retrieve({ database_id: RECORDS_DB_ID });
+    console.log('Records Database Properties:', Object.keys(recordsDb.properties));
+    
+    // Get Access Codes database info
+    const accessDb = await notion.databases.retrieve({ database_id: ACCESS_CODES_DB_ID });
+    console.log('Access Codes Database Properties:', Object.keys(accessDb.properties));
+    
+    // Get Counts database info
+    const countsDb = await notion.databases.retrieve({ database_id: COUNTS_DB_ID });
+    console.log('Counts Database Properties:', Object.keys(countsDb.properties));
+    
+    res.json({
+      success: true,
+      databases: {
+        users: Object.keys(usersDb.properties),
+        records: Object.keys(recordsDb.properties),
+        accessCodes: Object.keys(accessDb.properties),
+        counts: Object.keys(countsDb.properties)
+      }
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.json({ success: false, error: error.message });
+  }
+});
+
 // User registration
 app.post('/api/register', async (req, res) => {
   try {
