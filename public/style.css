@@ -76,6 +76,7 @@ h3 {
     font-size: 14px;
     transition: all 0.3s ease;
     background: rgba(255, 255, 255, 0.9);
+    color: #333333 !important; /* Force dark text color */
 }
 
 .form-group input:focus,
@@ -85,12 +86,31 @@ h3 {
     border-color: #667eea;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
     background: white;
+    color: #333333 !important; /* Force dark text color on focus */
 }
 
 .form-group textarea {
     resize: vertical;
     min-height: 100px;
     font-family: inherit;
+    color: #333333 !important; /* Force dark text color for textarea */
+}
+
+/* Additional input styling for better visibility */
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+    color: #6c757d !important;
+    opacity: 1;
+}
+
+.form-group input[type="file"] {
+    padding: 10px;
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+    background: #f8f9fa;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: #333333 !important;
 }
 
 /* Button Styles */
@@ -298,17 +318,25 @@ tr:last-child td {
 
 /* File Input Styling */
 input[type="file"] {
-    padding: 10px;
+    padding: 12px;
     border: 2px dashed #ccc;
     border-radius: 8px;
     background: #f8f9fa;
     cursor: pointer;
     transition: all 0.3s ease;
+    color: #333333 !important;
+    font-size: 14px;
 }
 
 input[type="file"]:hover {
     border-color: #667eea;
     background: #e7f3ff;
+}
+
+input[type="file"]:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 /* Loading States */
@@ -419,7 +447,20 @@ input[type="file"]:hover {
     .form-group textarea {
         background: rgba(52, 73, 94, 0.8);
         border-color: #34495e;
-        color: #ecf0f1;
+        color: #ecf0f1 !important;
+    }
+    
+    .form-group input::placeholder,
+    .form-group textarea::placeholder {
+        color: #bdc3c7 !important;
+        opacity: 1;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        background: rgba(52, 73, 94, 0.9);
+        color: #ecf0f1 !important;
     }
     
     table {
