@@ -51,7 +51,6 @@
         </div>
         <div class="button-group">
             <button type="button" id="checkAccessBtn">Submit</button>
-            <button type="button" id="saveAccessBtn" class="secondary">Save New Code</button>
         </div>
     </div>
 
@@ -320,50 +319,6 @@
             } finally {
                 isLoading = false;
                 setLoadingState(submitBtn, false);
-            }
-        }
-
-        async function saveAccessCode() {
-            if (isLoading) return;
-            
-            const accessCode = document.getElementById('accessCode').value.trim();
-            const saveBtn = document.getElementById('saveAccessBtn');
-
-            if (!accessCode) {
-                showAlert('Please enter access code to save', 'error');
-                return;
-            }
-
-            if (accessCode.length < 4) {
-                showAlert('Access code must be at least 4 characters long', 'error');
-                return;
-            }
-
-            isLoading = true;
-            setLoadingState(saveBtn, true);
-
-            try {
-                const response = await fetch('/api/save-access-code', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: JSON.stringify({ accessCode })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const result = await response.json();
-                showAlert(result.message, result.success ? 'success' : 'error');
-            } catch (error) {
-                console.error('Save access code error:', error);
-                showAlert('Failed to save access code. Please try again.', 'error');
-            } finally {
-                isLoading = false;
-                setLoadingState(saveBtn, false);
             }
         }
 
@@ -659,7 +614,6 @@
             const showRegisterBtn = document.getElementById('showRegisterBtn');
             const showLoginBtn = document.getElementById('showLoginBtn');
             const checkAccessBtn = document.getElementById('checkAccessBtn');
-            const saveAccessBtn = document.getElementById('saveAccessBtn');
             const addRecordBtn = document.getElementById('addRecordBtn');
             const clearRecordsBtn = document.getElementById('clearRecordsBtn');
             const refreshRecordsBtn = document.getElementById('refreshRecordsBtn');
@@ -669,7 +623,6 @@
             if (showRegisterBtn) showRegisterBtn.addEventListener('click', showRegister);
             if (showLoginBtn) showLoginBtn.addEventListener('click', showLogin);
             if (checkAccessBtn) checkAccessBtn.addEventListener('click', checkAccessCode);
-            if (saveAccessBtn) saveAccessBtn.addEventListener('click', saveAccessCode);
             if (addRecordBtn) addRecordBtn.addEventListener('click', addRecord);
             if (clearRecordsBtn) clearRecordsBtn.addEventListener('click', clearRecords);
             if (refreshRecordsBtn) refreshRecordsBtn.addEventListener('click', refreshRecords);
