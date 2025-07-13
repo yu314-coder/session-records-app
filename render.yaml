@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: session-records-app
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NOTION_API_KEY
+        sync: false  # This will be set manually in Render dashboard
+      - key: NOTION_RECORDS_DB_ID
+        sync: false  # This will be set manually in Render dashboard
+      - key: NOTION_USERS_DB_ID
+        sync: false  # This will be set manually in Render dashboard
+      - key: NOTION_ACCESS_CODES_DB_ID
+        sync: false  # This will be set manually in Render dashboard
+      - key: NOTION_COUNTS_DB_ID
+        sync: false  # This will be set manually in Render dashboard
+      - key: SESSION_SECRET
+        generateValue: true  # Render will auto-generate a secure secret
+    autoDeploy: true
