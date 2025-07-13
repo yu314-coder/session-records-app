@@ -141,7 +141,7 @@ app.post('/api/register', async (req, res) => {
     await notion.pages.create({
       parent: { database_id: USERS_DB_ID },
       properties: {
-        'Name': {
+        'UserID': {
           title: [{ text: { content: userID } }]
         },
         'Password': {
