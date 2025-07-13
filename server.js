@@ -77,42 +77,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Debug endpoint to check database schema
-app.get('/api/debug-database', async (req, res) => {
-  try {
-    console.log('Checking database schema...');
-    
-    // Get Users database info
-    const usersDb = await notion.databases.retrieve({ database_id: USERS_DB_ID });
-    console.log('Users Database Properties:', Object.keys(usersDb.properties));
-    
-    // Get Records database info  
-    const recordsDb = await notion.databases.retrieve({ database_id: RECORDS_DB_ID });
-    console.log('Records Database Properties:', Object.keys(recordsDb.properties));
-    
-    // Get Access Codes database info
-    const accessDb = await notion.databases.retrieve({ database_id: ACCESS_CODES_DB_ID });
-    console.log('Access Codes Database Properties:', Object.keys(accessDb.properties));
-    
-    // Get Counts database info
-    const countsDb = await notion.databases.retrieve({ database_id: COUNTS_DB_ID });
-    console.log('Counts Database Properties:', Object.keys(countsDb.properties));
-    
-    res.json({
-      success: true,
-      databases: {
-        users: Object.keys(usersDb.properties),
-        records: Object.keys(recordsDb.properties),
-        accessCodes: Object.keys(accessDb.properties),
-        counts: Object.keys(countsDb.properties)
-      }
-    });
-  } catch (error) {
-    console.error('Debug error:', error);
-    res.json({ success: false, error: error.message });
-  }
-});
-
 // User registration
 app.post('/api/register', async (req, res) => {
   try {
@@ -141,7 +105,7 @@ app.post('/api/register', async (req, res) => {
     await notion.pages.create({
       parent: { database_id: USERS_DB_ID },
       properties: {
-        'UserID': {
+        'Name': {
           title: [{ text: { content: userID } }]
         },
         'Password': {
@@ -170,7 +134,7 @@ app.post('/api/login', async (req, res) => {
     const users = await notion.databases.query({
       database_id: USERS_DB_ID,
       filter: {
-        property: 'Name',
+        property: 'UserID',
         title: {
           equals: userID,
         },
@@ -210,7 +174,7 @@ app.post('/api/check-access-code', async (req, res) => {
     const codes = await notion.databases.query({
       database_id: ACCESS_CODES_DB_ID,
       filter: {
-        property: 'Name',
+        property: 'AccessCode',
         title: {
           equals: accessCode,
         },
@@ -379,7 +343,7 @@ async function updateCounts(department) {
     const counts = await notion.databases.query({
       database_id: COUNTS_DB_ID,
       filter: {
-        property: 'Name',
+        property: 'Department',
         title: {
           equals: department,
         },
@@ -404,7 +368,7 @@ async function updateCounts(department) {
       await notion.pages.create({
         parent: { database_id: COUNTS_DB_ID },
         properties: {
-          'Name': {
+          'Department': {
             title: [{ text: { content: department } }]
           },
           'Count': {
