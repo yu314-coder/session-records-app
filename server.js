@@ -79,24 +79,39 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// User registration endpoint
+// User registration endpoint - FIXED to properly redirect to login
 app.post('/api/register', async (req, res) => {
   try {
     const { userID, password } = req.body;
     
-    console.log('Registration attempt for user:', userID);
+    console.log('📝 Registration attempt for user:', userID);
     
     // Validation
     if (!userID || !password) {
-      return res.json({ success: false, message: 'UserID and password are required' });
+      console.log('❌ Registration failed: Missing fields');
+      return res.json({ 
+        success: false, 
+        message: 'UserID and password are required',
+        redirect: false
+      });
     }
 
     if (userID.length < 3) {
-      return res.json({ success: false, message: 'UserID must be at least 3 characters long' });
+      console.log('❌ Registration failed: UserID too short');
+      return res.json({ 
+        success: false, 
+        message: 'UserID must be at least 3 characters long',
+        redirect: false
+      });
     }
 
     if (password.length < 6) {
-      return res.json({ success: false, message: 'Password must be at least 6 characters long' });
+      console.log('❌ Registration failed: Password too short');
+      return res.json({ 
+        success: false, 
+        message: 'Password must be at least 6 characters long',
+        redirect: false
+      });
     }
 
     // Check if user already exists
@@ -111,7 +126,12 @@ app.post('/api/register', async (req, res) => {
     });
 
     if (existingUsers.results.length > 0) {
-      return res.json({ success: false, message: 'UserID already registered' });
+      console.log('❌ Registration failed: User already exists');
+      return res.json({ 
+        success: false, 
+        message: 'UserID already registered. Please choose a different UserID.',
+        redirect: false
+      });
     }
 
     // Create user in Notion with plain text password
@@ -127,11 +147,24 @@ app.post('/api/register', async (req, res) => {
       },
     });
 
-    console.log('User registered successfully:', userID);
-    res.json({ success: true, message: 'Registration successful!' });
+    console.log('✅ User registered successfully:', userID);
+    
+    // Return success with redirect instruction
+    res.json({ 
+      success: true, 
+      message: 'Registration successful! Redirecting to login...',
+      redirect: true,
+      redirectTo: 'login',
+      userID: userID
+    });
+    
   } catch (error) {
-    console.error('Registration error:', error);
-    res.json({ success: false, message: 'Registration failed' });
+    console.error('💥 Registration error:', error);
+    res.json({ 
+      success: false, 
+      message: 'Registration failed. Please try again.',
+      redirect: false
+    });
   }
 });
 
@@ -140,10 +173,13 @@ app.post('/api/login', async (req, res) => {
   try {
     const { userID, password } = req.body;
 
-    console.log('Login attempt for user:', userID);
+    console.log('🔐 Login attempt for user:', userID);
 
     if (!userID || !password) {
-      return res.json({ success: false, message: 'UserID and password are required' });
+      return res.json({ 
+        success: false, 
+        message: 'UserID and password are required' 
+      });
     }
 
     // Find user in Notion
@@ -158,7 +194,11 @@ app.post('/api/login', async (req, res) => {
     });
 
     if (users.results.length === 0) {
-      return res.json({ success: false, message: 'User not found' });
+      console.log('❌ Login failed: User not found');
+      return res.json({ 
+        success: false, 
+        message: 'User not found. Please check your UserID or register first.' 
+      });
     }
 
     const user = users.results[0];
@@ -167,14 +207,28 @@ app.post('/api/login', async (req, res) => {
     // Compare plain text passwords
     if (storedPassword === password) {
       req.session.userID = userID;
-      console.log('User logged in successfully:', userID);
-      res.json({ success: true, message: 'Login successful!' });
+      req.session.loginTime = new Date().toISOString();
+      
+      console.log('✅ User logged in successfully:', userID);
+      res.json({ 
+        success: true, 
+        message: 'Login successful! Redirecting to access code...',
+        redirect: true,
+        redirectTo: 'accessCode'
+      });
     } else {
-      res.json({ success: false, message: 'Invalid password' });
+      console.log('❌ Login failed: Invalid password');
+      res.json({ 
+        success: false, 
+        message: 'Invalid password. Please check your password and try again.' 
+      });
     }
   } catch (error) {
-    console.error('Login error:', error);
-    res.json({ success: false, message: 'Login failed' });
+    console.error('💥 Login error:', error);
+    res.json({ 
+      success: false, 
+      message: 'Login failed. Please try again.' 
+    });
   }
 });
 
@@ -183,10 +237,13 @@ app.post('/api/check-access-code', async (req, res) => {
   try {
     const { accessCode } = req.body;
 
-    console.log('Access code check attempt:', accessCode);
+    console.log('🔑 Access code check attempt:', accessCode);
 
     if (!accessCode) {
-      return res.json({ success: false, message: 'Access code is required' });
+      return res.json({ 
+        success: false, 
+        message: 'Access code is required' 
+      });
     }
 
     // Check access code in Notion
@@ -202,14 +259,28 @@ app.post('/api/check-access-code', async (req, res) => {
 
     if (codes.results.length > 0) {
       req.session.accessGranted = true;
-      console.log('Access granted for code:', accessCode);
-      res.json({ success: true, message: 'Access granted!' });
+      req.session.accessTime = new Date().toISOString();
+      
+      console.log('✅ Access granted for code:', accessCode);
+      res.json({ 
+        success: true, 
+        message: 'Access granted! Welcome to the Session Records System.',
+        redirect: true,
+        redirectTo: 'app'
+      });
     } else {
-      res.json({ success: false, message: 'Invalid access code' });
+      console.log('❌ Invalid access code:', accessCode);
+      res.json({ 
+        success: false, 
+        message: 'Invalid access code. Please contact your administrator for a valid code.' 
+      });
     }
   } catch (error) {
-    console.error('Access code check error:', error);
-    res.json({ success: false, message: 'Access code check failed' });
+    console.error('💥 Access code check error:', error);
+    res.json({ 
+      success: false, 
+      message: 'Access code check failed. Please try again.' 
+    });
   }
 });
 
@@ -217,18 +288,31 @@ app.post('/api/check-access-code', async (req, res) => {
 app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
-      return res.json({ success: false, message: 'Not authenticated' });
+      return res.json({ 
+        success: false, 
+        message: 'Not authenticated. Please login first.' 
+      });
     }
 
     const { department, syllabusText } = req.body;
     const notesFileName = req.file ? req.file.filename : '';
     const dateTime = new Date().toISOString();
 
-    console.log('Adding record for user:', req.session.userID, 'Department:', department);
+    console.log('📄 Adding record for user:', req.session.userID, 'Department:', department);
 
     // Validation
     if (!department) {
-      return res.json({ success: false, message: 'Department is required' });
+      return res.json({ 
+        success: false, 
+        message: 'Please select a department' 
+      });
+    }
+
+    if (!syllabusText && !notesFileName) {
+      return res.json({ 
+        success: false, 
+        message: 'Please provide either syllabus text or upload a notes file' 
+      });
     }
 
     // Create record in Notion
@@ -259,11 +343,23 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
     // Update department counts
     await updateCounts(department);
 
-    console.log('Record added successfully');
-    res.json({ success: true, message: 'Record added successfully!' });
+    console.log('✅ Record added successfully');
+    res.json({ 
+      success: true, 
+      message: 'Record added successfully!',
+      recordInfo: {
+        department: department,
+        hasFile: !!notesFileName,
+        hasText: !!syllabusText,
+        timestamp: new Date().toLocaleString()
+      }
+    });
   } catch (error) {
-    console.error('Add record error:', error);
-    res.json({ success: false, message: 'Failed to add record' });
+    console.error('💥 Add record error:', error);
+    res.json({ 
+      success: false, 
+      message: 'Failed to add record. Please try again.' 
+    });
   }
 });
 
@@ -271,10 +367,13 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
 app.get('/api/records', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
-      return res.json({ success: false, message: 'Not authenticated' });
+      return res.json({ 
+        success: false, 
+        message: 'Not authenticated. Please login first.' 
+      });
     }
 
-    console.log('Fetching records for user:', req.session.userID);
+    console.log('📊 Fetching records for user:', req.session.userID);
 
     const records = await notion.databases.query({
       database_id: RECORDS_DB_ID,
@@ -298,11 +397,18 @@ app.get('/api/records', async (req, res) => {
       ];
     });
 
-    console.log('Retrieved', formattedRecords.length, 'records');
-    res.json({ success: true, data: formattedRecords });
+    console.log('✅ Retrieved', formattedRecords.length, 'records');
+    res.json({ 
+      success: true, 
+      data: formattedRecords,
+      count: formattedRecords.length
+    });
   } catch (error) {
-    console.error('Get records error:', error);
-    res.json({ success: false, message: 'Failed to get records' });
+    console.error('💥 Get records error:', error);
+    res.json({ 
+      success: false, 
+      message: 'Failed to get records. Please try again.' 
+    });
   }
 });
 
@@ -310,29 +416,40 @@ app.get('/api/records', async (req, res) => {
 app.post('/api/clear-records', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
-      return res.json({ success: false, message: 'Not authenticated' });
+      return res.json({ 
+        success: false, 
+        message: 'Not authenticated. Please login first.' 
+      });
     }
 
     const { adminPassword } = req.body;
 
-    console.log('Clear records attempt by user:', req.session.userID);
+    console.log('🗑️ Clear records attempt by user:', req.session.userID);
 
     // Check admin password
     if (!adminPassword) {
-      return res.json({ success: false, message: 'Admin password required' });
+      return res.json({ 
+        success: false, 
+        message: 'Admin password is required to clear all records' 
+      });
     }
 
     if (adminPassword !== process.env.ADMIN_PASSWORD) {
-      console.log('Invalid admin password attempt');
-      return res.json({ success: false, message: 'Invalid admin password' });
+      console.log('❌ Invalid admin password attempt by:', req.session.userID);
+      return res.json({ 
+        success: false, 
+        message: 'Invalid admin password. Access denied.' 
+      });
     }
 
-    console.log('Admin password verified, clearing records...');
+    console.log('✅ Admin password verified, clearing records...');
 
     // Get all records
     const records = await notion.databases.query({
       database_id: RECORDS_DB_ID,
     });
+
+    const recordCount = records.results.length;
 
     // Archive all records (Notion doesn't support bulk delete)
     for (const record of records.results) {
@@ -362,7 +479,7 @@ app.post('/api/clear-records', async (req, res) => {
           rich_text: [{ text: { content: '' } }]
         },
         'SyllabusText': {
-          rich_text: [{ text: { content: `All records cleared by ${req.session.userID} with admin password verification at ${new Date().toLocaleString()}` } }]
+          rich_text: [{ text: { content: `ADMIN CLEAR: ${recordCount} records cleared by ${req.session.userID} with admin password verification at ${new Date().toLocaleString()}` } }]
         }
       },
     });
@@ -370,11 +487,20 @@ app.post('/api/clear-records', async (req, res) => {
     // Clear counts
     await clearCounts();
 
-    console.log('All records cleared successfully by:', req.session.userID);
-    res.json({ success: true, message: 'All records cleared successfully!' });
+    console.log('✅ All records cleared successfully by:', req.session.userID);
+    res.json({ 
+      success: true, 
+      message: `Successfully cleared ${recordCount} records from the database.`,
+      clearedCount: recordCount,
+      clearedBy: req.session.userID,
+      clearedAt: new Date().toLocaleString()
+    });
   } catch (error) {
-    console.error('Clear records error:', error);
-    res.json({ success: false, message: 'Failed to clear records' });
+    console.error('💥 Clear records error:', error);
+    res.json({ 
+      success: false, 
+      message: 'Failed to clear records. Please try again.' 
+    });
   }
 });
 
@@ -382,7 +508,10 @@ app.post('/api/clear-records', async (req, res) => {
 app.get('/api/counts', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
-      return res.json({ success: false, message: 'Not authenticated' });
+      return res.json({ 
+        success: false, 
+        message: 'Not authenticated. Please login first.' 
+      });
     }
 
     const counts = await notion.databases.query({
@@ -397,21 +526,38 @@ app.get('/api/counts', async (req, res) => {
       };
     });
 
-    res.json({ success: true, data: formattedCounts });
+    res.json({ 
+      success: true, 
+      data: formattedCounts,
+      totalDepartments: formattedCounts.length
+    });
   } catch (error) {
-    console.error('Get counts error:', error);
-    res.json({ success: false, message: 'Failed to get counts' });
+    console.error('💥 Get counts error:', error);
+    res.json({ 
+      success: false, 
+      message: 'Failed to get department counts. Please try again.' 
+    });
   }
 });
 
 // Logout endpoint
 app.post('/api/logout', (req, res) => {
+  const userID = req.session.userID;
   req.session.destroy((err) => {
     if (err) {
-      console.error('Logout error:', err);
-      return res.json({ success: false, message: 'Logout failed' });
+      console.error('💥 Logout error:', err);
+      return res.json({ 
+        success: false, 
+        message: 'Logout failed. Please try again.' 
+      });
     }
-    res.json({ success: true, message: 'Logged out successfully' });
+    console.log('👋 User logged out:', userID);
+    res.json({ 
+      success: true, 
+      message: 'Logged out successfully',
+      redirect: true,
+      redirectTo: 'login'
+    });
   });
 });
 
@@ -419,16 +565,28 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ 
     success: true, 
-    message: 'Server is running', 
+    message: 'Session Records Management System is running', 
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Session info endpoint
+app.get('/api/session', (req, res) => {
+  res.json({
+    authenticated: !!(req.session.userID && req.session.accessGranted),
+    userID: req.session.userID || null,
+    loginTime: req.session.loginTime || null,
+    accessTime: req.session.accessTime || null
   });
 });
 
 // Helper function to update department counts
 async function updateCounts(department) {
   try {
-    console.log('Updating counts for department:', department);
+    console.log('📊 Updating counts for department:', department);
 
     // Get existing counts for this department
     const counts = await notion.databases.query({
@@ -455,7 +613,7 @@ async function updateCounts(department) {
         },
       });
       
-      console.log('Updated count for', department, 'to', currentCount + 1);
+      console.log('✅ Updated count for', department, 'to', currentCount + 1);
     } else {
       // Create new count entry
       await notion.pages.create({
@@ -470,17 +628,17 @@ async function updateCounts(department) {
         },
       });
       
-      console.log('Created new count entry for', department, 'with count 1');
+      console.log('✅ Created new count entry for', department, 'with count 1');
     }
   } catch (error) {
-    console.error('Update counts error:', error);
+    console.error('💥 Update counts error:', error);
   }
 }
 
 // Helper function to clear all counts
 async function clearCounts() {
   try {
-    console.log('Clearing all department counts...');
+    console.log('🗑️ Clearing all department counts...');
 
     const counts = await notion.databases.query({
       database_id: COUNTS_DB_ID,
@@ -493,18 +651,18 @@ async function clearCounts() {
       });
     }
 
-    console.log('All counts cleared');
+    console.log('✅ All counts cleared');
   } catch (error) {
-    console.error('Clear counts error:', error);
+    console.error('💥 Clear counts error:', error);
   }
 }
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error('Express error:', error);
+  console.error('💥 Express error:', error);
   res.status(500).json({ 
     success: false, 
-    message: 'Internal server error' 
+    message: 'Internal server error. Please try again.' 
   });
 });
 
@@ -512,16 +670,19 @@ app.use((error, req, res, next) => {
 app.use((req, res) => {
   res.status(404).json({ 
     success: false, 
-    message: 'Endpoint not found' 
+    message: 'Endpoint not found',
+    requestedPath: req.path
   });
 });
 
 // Start server
 app.listen(PORT, async () => {
   await ensureUploadsDir();
+  console.log(`\n🚀 SESSION RECORDS MANAGEMENT SYSTEM`);
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌐 App URL: http://localhost:${PORT}`);
-  console.log(`📚 Session Records Management System Ready!`);
+  console.log(`🌐 Local URL: http://localhost:${PORT}`);
+  console.log(`📚 Ready to manage session records!`);
+  console.log(`⏰ Started at: ${new Date().toLocaleString()}\n`);
 });
 
 // Graceful shutdown
