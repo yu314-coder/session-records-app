@@ -18,13 +18,13 @@ const notion = new Client({
   auth: process.env.NOTION_API_KEY,
 });
 
-// Database IDs (you'll need to create these in Notion)
+// Database IDs from environment variables
 const RECORDS_DB_ID = process.env.NOTION_RECORDS_DB_ID;
 const USERS_DB_ID = process.env.NOTION_USERS_DB_ID;
 const ACCESS_CODES_DB_ID = process.env.NOTION_ACCESS_CODES_DB_ID;
 const COUNTS_DB_ID = process.env.NOTION_COUNTS_DB_ID;
 
-// Middleware
+// Middleware setup
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -35,10 +35,10 @@ app.use(session({
   cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
 }));
 
-// Serve static files
+// Serve static files from public directory
 app.use(express.static('public'));
 
-// Configure multer for file uploads
+// Configure multer for PDF file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/');
@@ -65,8 +65,10 @@ const upload = multer({
 const ensureUploadsDir = async () => {
   try {
     await fs.access('uploads');
+    console.log('Uploads directory exists');
   } catch (error) {
     await fs.mkdir('uploads', { recursive: true });
+    console.log('Created uploads directory');
   }
 };
 
@@ -77,13 +79,24 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// User registration
+// User registration endpoint
 app.post('/api/register', async (req, res) => {
   try {
     const { userID, password } = req.body;
     
+    console.log('Registration attempt for user:', userID);
+    
+    // Validation
     if (!userID || !password) {
       return res.json({ success: false, message: 'UserID and password are required' });
+    }
+
+    if (userID.length < 3) {
+      return res.json({ success: false, message: 'UserID must be at least 3 characters long' });
+    }
+
+    if (password.length < 6) {
+      return res.json({ success: false, message: 'Password must be at least 6 characters long' });
     }
 
     // Check if user already exists
@@ -101,30 +114,33 @@ app.post('/api/register', async (req, res) => {
       return res.json({ success: false, message: 'UserID already registered' });
     }
 
-    // Create user in Notion (store plain text password)
+    // Create user in Notion with plain text password
     await notion.pages.create({
       parent: { database_id: USERS_DB_ID },
       properties: {
-        'Name': {
+        'UserID': {
           title: [{ text: { content: userID } }]
         },
         'Password': {
-          rich_text: [{ text: { content: password } }]  // Store plain text password
+          rich_text: [{ text: { content: password } }]
         }
       },
     });
 
-    res.json({ success: true, message: 'Registered' });
+    console.log('User registered successfully:', userID);
+    res.json({ success: true, message: 'Registration successful!' });
   } catch (error) {
     console.error('Registration error:', error);
     res.json({ success: false, message: 'Registration failed' });
   }
 });
 
-// User login
+// User login endpoint
 app.post('/api/login', async (req, res) => {
   try {
     const { userID, password } = req.body;
+
+    console.log('Login attempt for user:', userID);
 
     if (!userID || !password) {
       return res.json({ success: false, message: 'UserID and password are required' });
@@ -151,9 +167,10 @@ app.post('/api/login', async (req, res) => {
     // Compare plain text passwords
     if (storedPassword === password) {
       req.session.userID = userID;
-      res.json({ success: true, message: 'Success' });
+      console.log('User logged in successfully:', userID);
+      res.json({ success: true, message: 'Login successful!' });
     } else {
-      res.json({ success: false, message: 'Login failed' });
+      res.json({ success: false, message: 'Invalid password' });
     }
   } catch (error) {
     console.error('Login error:', error);
@@ -161,10 +178,12 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Check access code
+// Check access code endpoint
 app.post('/api/check-access-code', async (req, res) => {
   try {
     const { accessCode } = req.body;
+
+    console.log('Access code check attempt:', accessCode);
 
     if (!accessCode) {
       return res.json({ success: false, message: 'Access code is required' });
@@ -183,9 +202,10 @@ app.post('/api/check-access-code', async (req, res) => {
 
     if (codes.results.length > 0) {
       req.session.accessGranted = true;
-      res.json({ success: true, message: 'Success' });
+      console.log('Access granted for code:', accessCode);
+      res.json({ success: true, message: 'Access granted!' });
     } else {
-      res.json({ success: false, message: 'Invalid Access Code' });
+      res.json({ success: false, message: 'Invalid access code' });
     }
   } catch (error) {
     console.error('Access code check error:', error);
@@ -193,7 +213,7 @@ app.post('/api/check-access-code', async (req, res) => {
   }
 });
 
-// Add record
+// Add record endpoint with file upload
 app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
@@ -204,13 +224,17 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
     const notesFileName = req.file ? req.file.filename : '';
     const dateTime = new Date().toISOString();
 
+    console.log('Adding record for user:', req.session.userID, 'Department:', department);
+
+    // Validation
+    if (!department) {
+      return res.json({ success: false, message: 'Department is required' });
+    }
+
     // Create record in Notion
     await notion.pages.create({
       parent: { database_id: RECORDS_DB_ID },
       properties: {
-        'Name': {
-          title: [{ text: { content: `Record-${Date.now()}` } }]
-        },
         'ID': {
           number: Date.now()
         },
@@ -232,22 +256,25 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
       },
     });
 
-    // Update counts
+    // Update department counts
     await updateCounts(department);
 
-    res.json({ success: true, message: 'Record added' });
+    console.log('Record added successfully');
+    res.json({ success: true, message: 'Record added successfully!' });
   } catch (error) {
     console.error('Add record error:', error);
     res.json({ success: false, message: 'Failed to add record' });
   }
 });
 
-// Get records
+// Get records endpoint
 app.get('/api/records', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
       return res.json({ success: false, message: 'Not authenticated' });
     }
+
+    console.log('Fetching records for user:', req.session.userID);
 
     const records = await notion.databases.query({
       database_id: RECORDS_DB_ID,
@@ -271,6 +298,7 @@ app.get('/api/records', async (req, res) => {
       ];
     });
 
+    console.log('Retrieved', formattedRecords.length, 'records');
     res.json({ success: true, data: formattedRecords });
   } catch (error) {
     console.error('Get records error:', error);
@@ -278,7 +306,7 @@ app.get('/api/records', async (req, res) => {
   }
 });
 
-// Clear records
+// Clear records endpoint with admin password protection
 app.post('/api/clear-records', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
@@ -287,14 +315,19 @@ app.post('/api/clear-records', async (req, res) => {
 
     const { adminPassword } = req.body;
 
+    console.log('Clear records attempt by user:', req.session.userID);
+
     // Check admin password
     if (!adminPassword) {
       return res.json({ success: false, message: 'Admin password required' });
     }
 
     if (adminPassword !== process.env.ADMIN_PASSWORD) {
+      console.log('Invalid admin password attempt');
       return res.json({ success: false, message: 'Invalid admin password' });
     }
+
+    console.log('Admin password verified, clearing records...');
 
     // Get all records
     const records = await notion.databases.query({
@@ -309,13 +342,10 @@ app.post('/api/clear-records', async (req, res) => {
       });
     }
 
-    // Add clear record
+    // Add a clear record for audit trail
     await notion.pages.create({
       parent: { database_id: RECORDS_DB_ID },
       properties: {
-        'Name': {
-          title: [{ text: { content: `Cleared-${Date.now()}` } }]
-        },
         'ID': {
           number: Date.now()
         },
@@ -323,7 +353,7 @@ app.post('/api/clear-records', async (req, res) => {
           date: { start: new Date().toISOString() }
         },
         'Department': {
-          select: { name: 'Cleared All' }
+          select: { name: 'System' }
         },
         'UserID': {
           rich_text: [{ text: { content: req.session.userID } }]
@@ -332,7 +362,7 @@ app.post('/api/clear-records', async (req, res) => {
           rich_text: [{ text: { content: '' } }]
         },
         'SyllabusText': {
-          rich_text: [{ text: { content: `Cleared by ${req.session.userID} with admin password` } }]
+          rich_text: [{ text: { content: `All records cleared by ${req.session.userID} with admin password verification at ${new Date().toLocaleString()}` } }]
         }
       },
     });
@@ -340,17 +370,67 @@ app.post('/api/clear-records', async (req, res) => {
     // Clear counts
     await clearCounts();
 
-    res.json({ success: true, message: 'All records cleared successfully' });
+    console.log('All records cleared successfully by:', req.session.userID);
+    res.json({ success: true, message: 'All records cleared successfully!' });
   } catch (error) {
     console.error('Clear records error:', error);
     res.json({ success: false, message: 'Failed to clear records' });
   }
 });
 
-// Helper function to update counts
+// Get department counts endpoint
+app.get('/api/counts', async (req, res) => {
+  try {
+    if (!req.session.userID || !req.session.accessGranted) {
+      return res.json({ success: false, message: 'Not authenticated' });
+    }
+
+    const counts = await notion.databases.query({
+      database_id: COUNTS_DB_ID,
+    });
+
+    const formattedCounts = counts.results.map(count => {
+      const props = count.properties;
+      return {
+        department: props.Department?.title?.[0]?.text?.content || '',
+        count: props.Count?.number || 0
+      };
+    });
+
+    res.json({ success: true, data: formattedCounts });
+  } catch (error) {
+    console.error('Get counts error:', error);
+    res.json({ success: false, message: 'Failed to get counts' });
+  }
+});
+
+// Logout endpoint
+app.post('/api/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Logout error:', err);
+      return res.json({ success: false, message: 'Logout failed' });
+    }
+    res.json({ success: true, message: 'Logged out successfully' });
+  });
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'Server is running', 
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
+});
+
+// Helper function to update department counts
 async function updateCounts(department) {
   try {
-    // Get existing counts
+    console.log('Updating counts for department:', department);
+
+    // Get existing counts for this department
     const counts = await notion.databases.query({
       database_id: COUNTS_DB_ID,
       filter: {
@@ -374,6 +454,8 @@ async function updateCounts(department) {
           }
         },
       });
+      
+      console.log('Updated count for', department, 'to', currentCount + 1);
     } else {
       // Create new count entry
       await notion.pages.create({
@@ -387,15 +469,19 @@ async function updateCounts(department) {
           }
         },
       });
+      
+      console.log('Created new count entry for', department, 'with count 1');
     }
   } catch (error) {
     console.error('Update counts error:', error);
   }
 }
 
-// Helper function to clear counts
+// Helper function to clear all counts
 async function clearCounts() {
   try {
+    console.log('Clearing all department counts...');
+
     const counts = await notion.databases.query({
       database_id: COUNTS_DB_ID,
     });
@@ -406,13 +492,45 @@ async function clearCounts() {
         archived: true,
       });
     }
+
+    console.log('All counts cleared');
   } catch (error) {
     console.error('Clear counts error:', error);
   }
 }
 
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('Express error:', error);
+  res.status(500).json({ 
+    success: false, 
+    message: 'Internal server error' 
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ 
+    success: false, 
+    message: 'Endpoint not found' 
+  });
+});
+
 // Start server
 app.listen(PORT, async () => {
   await ensureUploadsDir();
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌐 App URL: http://localhost:${PORT}`);
+  console.log(`📚 Session Records Management System Ready!`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n🛑 Shutting down server gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n🛑 Server terminated');
+  process.exit(0);
 });
