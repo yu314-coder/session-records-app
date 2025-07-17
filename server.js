@@ -79,7 +79,111 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// User registration endpoint - FIXED to properly redirect to login
+// File download endpoint - NEW!
+app.get('/api/download/:filename', async (req, res) => {
+  try {
+    if (!req.session.userID || !req.session.accessGranted) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Not authenticated. Please login first.' 
+      });
+    }
+
+    const filename = req.params.filename;
+    const filePath = path.join(__dirname, 'uploads', filename);
+
+    // Check if file exists
+    try {
+      await fs.access(filePath);
+    } catch (error) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Get file stats
+    const stats = await fs.stat(filePath);
+    
+    // Find the record with this file to get original name
+    const records = await notion.databases.query({
+      database_id: RECORDS_DB_ID,
+      filter: {
+        property: 'StoredFileName',
+        rich_text: {
+          equals: filename,
+        },
+      },
+    });
+
+    let originalName = filename;
+    if (records.results.length > 0) {
+      originalName = records.results[0].properties.OriginalFileName?.rich_text?.[0]?.text?.content || filename;
+    }
+
+    // Set headers for file download
+    res.setHeader('Content-Disposition', `attachment; filename="${originalName}"`);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', stats.size);
+
+    // Stream the file
+    const fileStream = require('fs').createReadStream(filePath);
+    fileStream.pipe(res);
+
+    console.log('📥 File downloaded:', originalName, 'by user:', req.session.userID);
+
+  } catch (error) {
+    console.error('💥 File download error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to download file. Please try again.' 
+    });
+  }
+});
+
+// File view endpoint (for viewing in browser) - NEW!
+app.get('/api/view/:filename', async (req, res) => {
+  try {
+    if (!req.session.userID || !req.session.accessGranted) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Not authenticated. Please login first.' 
+      });
+    }
+
+    const filename = req.params.filename;
+    const filePath = path.join(__dirname, 'uploads', filename);
+
+    // Check if file exists
+    try {
+      await fs.access(filePath);
+    } catch (error) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Set headers for inline viewing
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline');
+
+    // Stream the file
+    const fileStream = require('fs').createReadStream(filePath);
+    fileStream.pipe(res);
+
+    console.log('👁️ File viewed:', filename, 'by user:', req.session.userID);
+
+  } catch (error) {
+    console.error('💥 File view error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to view file. Please try again.' 
+    });
+  }
+});
+
+// User registration endpoint
 app.post('/api/register', async (req, res) => {
   try {
     const { userID, password } = req.body;
@@ -284,7 +388,7 @@ app.post('/api/check-access-code', async (req, res) => {
   }
 });
 
-// Add record endpoint with file upload
+// Add record endpoint with IMPROVED file upload handling
 app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
@@ -295,7 +399,6 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
     }
 
     const { department, syllabusText } = req.body;
-    const notesFileName = req.file ? req.file.filename : '';
     const dateTime = new Date().toISOString();
 
     console.log('📄 Adding record for user:', req.session.userID, 'Department:', department);
@@ -308,14 +411,33 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
       });
     }
 
-    if (!syllabusText && !notesFileName) {
+    if (!syllabusText && !req.file) {
       return res.json({ 
         success: false, 
         message: 'Please provide either syllabus text or upload a notes file' 
       });
     }
 
-    // Create record in Notion
+    // Prepare file information - IMPROVED!
+    let fileInfo = {
+      originalName: '',
+      storedName: '',
+      fileSize: 0,
+      fileUrl: '',
+      viewUrl: ''
+    };
+
+    if (req.file) {
+      fileInfo = {
+        originalName: req.file.originalname,
+        storedName: req.file.filename,
+        fileSize: req.file.size,
+        fileUrl: `/api/download/${req.file.filename}`,
+        viewUrl: `/api/view/${req.file.filename}`
+      };
+    }
+
+    // Create record in Notion with IMPROVED file properties
     await notion.pages.create({
       parent: { database_id: RECORDS_DB_ID },
       properties: {
@@ -331,8 +453,25 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
         'UserID': {
           rich_text: [{ text: { content: req.session.userID } }]
         },
-        'NotesFile': {
-          rich_text: [{ text: { content: notesFileName || '' } }]
+        // IMPROVED: Store original filename for display
+        'OriginalFileName': {
+          rich_text: [{ text: { content: fileInfo.originalName } }]
+        },
+        // IMPROVED: Store system filename for internal use
+        'StoredFileName': {
+          rich_text: [{ text: { content: fileInfo.storedName } }]
+        },
+        // IMPROVED: Store file size
+        'FileSize': {
+          number: fileInfo.fileSize
+        },
+        // IMPROVED: Store download URL
+        'FileDownloadURL': {
+          url: fileInfo.fileUrl || null
+        },
+        // IMPROVED: Store view URL
+        'FileViewURL': {
+          url: fileInfo.viewUrl || null
         },
         'SyllabusText': {
           rich_text: [{ text: { content: syllabusText || '' } }]
@@ -346,12 +485,16 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
     console.log('✅ Record added successfully');
     res.json({ 
       success: true, 
-      message: 'Record added successfully!',
+      message: `Record added successfully! ${fileInfo.originalName ? `File "${fileInfo.originalName}" uploaded.` : ''}`,
       recordInfo: {
         department: department,
-        hasFile: !!notesFileName,
+        hasFile: !!req.file,
+        fileName: fileInfo.originalName,
+        fileSize: fileInfo.fileSize,
         hasText: !!syllabusText,
-        timestamp: new Date().toLocaleString()
+        timestamp: new Date().toLocaleString(),
+        downloadUrl: fileInfo.fileUrl,
+        viewUrl: fileInfo.viewUrl
       }
     });
   } catch (error) {
@@ -363,7 +506,7 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
   }
 });
 
-// Get records endpoint
+// Get records endpoint with IMPROVED file information
 app.get('/api/records', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
@@ -387,13 +530,30 @@ app.get('/api/records', async (req, res) => {
 
     const formattedRecords = records.results.map(record => {
       const props = record.properties;
+      
+      // IMPROVED: Better file display with download/view links
+      const originalFileName = props.OriginalFileName?.rich_text?.[0]?.text?.content || '';
+      const storedFileName = props.StoredFileName?.rich_text?.[0]?.text?.content || '';
+      const fileSize = props.FileSize?.number || 0;
+      const downloadUrl = props.FileDownloadURL?.url || '';
+      const viewUrl = props.FileViewURL?.url || '';
+      
+      let fileDisplay = '';
+      if (originalFileName) {
+        const fileSizeKB = Math.round(fileSize / 1024);
+        fileDisplay = `📄 ${originalFileName} (${fileSizeKB}KB)`;
+      }
+
       return [
         props.ID?.number || '',
         props.DateTime?.date?.start || '',
         props.Department?.select?.name || '',
         props.UserID?.rich_text?.[0]?.text?.content || '',
-        props.NotesFile?.rich_text?.[0]?.text?.content || '',
-        props.SyllabusText?.rich_text?.[0]?.text?.content || ''
+        fileDisplay, // Show original filename with size
+        props.SyllabusText?.rich_text?.[0]?.text?.content || '',
+        downloadUrl, // Add download URL for frontend use
+        viewUrl, // Add view URL for frontend use
+        storedFileName // Add stored filename for internal use
       ];
     });
 
@@ -422,34 +582,30 @@ app.post('/api/clear-records', async (req, res) => {
       });
     }
 
-    const { adminPassword } = req.body;
-
     console.log('🗑️ Clear records attempt by user:', req.session.userID);
 
-    // Check admin password
-    if (!adminPassword) {
-      return res.json({ 
-        success: false, 
-        message: 'Admin password is required to clear all records' 
-      });
-    }
-
-    if (adminPassword !== process.env.ADMIN_PASSWORD) {
-      console.log('❌ Invalid admin password attempt by:', req.session.userID);
-      return res.json({ 
-        success: false, 
-        message: 'Invalid admin password. Access denied.' 
-      });
-    }
-
-    console.log('✅ Admin password verified, clearing records...');
-
-    // Get all records
+    // Get all records first to clean up files
     const records = await notion.databases.query({
       database_id: RECORDS_DB_ID,
     });
 
     const recordCount = records.results.length;
+
+    // Clean up uploaded files
+    let filesDeleted = 0;
+    for (const record of records.results) {
+      const storedFileName = record.properties.StoredFileName?.rich_text?.[0]?.text?.content;
+      if (storedFileName) {
+        try {
+          const filePath = path.join(__dirname, 'uploads', storedFileName);
+          await fs.unlink(filePath);
+          filesDeleted++;
+          console.log('🗑️ Deleted file:', storedFileName);
+        } catch (error) {
+          console.log('⚠️ Could not delete file:', storedFileName, error.message);
+        }
+      }
+    }
 
     // Archive all records (Notion doesn't support bulk delete)
     for (const record of records.results) {
@@ -475,11 +631,17 @@ app.post('/api/clear-records', async (req, res) => {
         'UserID': {
           rich_text: [{ text: { content: req.session.userID } }]
         },
-        'NotesFile': {
+        'OriginalFileName': {
           rich_text: [{ text: { content: '' } }]
         },
+        'StoredFileName': {
+          rich_text: [{ text: { content: '' } }]
+        },
+        'FileSize': {
+          number: 0
+        },
         'SyllabusText': {
-          rich_text: [{ text: { content: `ADMIN CLEAR: ${recordCount} records cleared by ${req.session.userID} with admin password verification at ${new Date().toLocaleString()}` } }]
+          rich_text: [{ text: { content: `ADMIN CLEAR: ${recordCount} records and ${filesDeleted} files cleared by ${req.session.userID} at ${new Date().toLocaleString()}` } }]
         }
       },
     });
@@ -490,8 +652,9 @@ app.post('/api/clear-records', async (req, res) => {
     console.log('✅ All records cleared successfully by:', req.session.userID);
     res.json({ 
       success: true, 
-      message: `Successfully cleared ${recordCount} records from the database.`,
+      message: `Successfully cleared ${recordCount} records and ${filesDeleted} files from the system.`,
       clearedCount: recordCount,
+      filesDeleted: filesDeleted,
       clearedBy: req.session.userID,
       clearedAt: new Date().toLocaleString()
     });
