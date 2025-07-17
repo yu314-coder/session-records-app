@@ -71,7 +71,7 @@
             <label for="notesFile">Upload Notes (PDF):</label>
             <input type="file" id="notesFile" accept=".pdf">
             <small style="color: #6c757d; font-size: 0.85em; margin-top: 5px; display: block;">
-                📄 Supported: PDF files only, max 10MB
+                📄 Supported: PDF files only, max 20MB (uploaded to Notion)
             </small>
         </div>
         
@@ -90,6 +90,9 @@
 
         <div id="recordsContainer">
             <h3>Records History</h3>
+            <p style="color: #6c757d; font-size: 0.9em; margin-bottom: 15px;">
+                📁 Files are stored in Notion and accessible via download/view buttons
+            </p>
             <table id="recordsTable">
                 <thead>
                     <tr>
@@ -110,7 +113,7 @@
     </div>
 
     <script>
-        console.log('🚀 JavaScript starting...');
+        console.log('🚀 JavaScript starting with Notion integration...');
         
         // Global variables
         let currentUser = null;
@@ -147,43 +150,77 @@
             }
         }
 
-        // File download function
-        function downloadFile(filename, originalName) {
-            if (!filename) {
+        // File download function - UPDATED: Handles Notion processing states
+        async function downloadFile(recordId, fileName) {
+            if (!recordId) {
                 showAlert('No file to download', 'error');
                 return;
             }
             
-            console.log('📥 Downloading file:', originalName || filename);
+            console.log('📥 Downloading file from Notion for record:', recordId);
             
-            // Create a temporary link and click it
-            const link = document.createElement('a');
-            link.href = `/api/download/${filename}`;
-            link.download = originalName || filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            showAlert(`Downloading ${originalName || filename}...`, 'success');
+            try {
+                showAlert('Getting download link from Notion...', 'success');
+                
+                const response = await fetch(`/api/download/${recordId}`, {
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Create a temporary link and click it to download from Notion
+                    const link = document.createElement('a');
+                    link.href = result.downloadUrl;
+                    link.download = result.filename || fileName || 'file.pdf';
+                    link.target = '_blank'; // Open in new tab as backup
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    showAlert(`Downloading ${result.filename} from Notion...`, 'success');
+                } else if (result.processing) {
+                    showAlert('File is still being processed by Notion. Please try again in a few moments.', 'error');
+                    // Offer to retry after a delay
+                    setTimeout(() => {
+                        if (confirm('File may be ready now. Try downloading again?')) {
+                            downloadFile(recordId, fileName);
+                        }
+                    }, 5000);
+                } else {
+                    showAlert(result.message || 'Failed to get download link', 'error');
+                }
+            } catch (error) {
+                console.error('Download error:', error);
+                showAlert('Failed to download file. Please try again.', 'error');
+            }
         }
 
-        // File view function
-        function viewFile(filename, originalName) {
-            if (!filename) {
+        // File view function - UPDATED: Handles Notion processing states
+        async function viewFile(recordId, fileName) {
+            if (!recordId) {
                 showAlert('No file to view', 'error');
                 return;
             }
             
-            console.log('👁️ Viewing file:', originalName || filename);
+            console.log('👁️ Opening file from Notion for record:', recordId);
             
-            // Open file in new tab for viewing
-            const viewUrl = `/api/view/${filename}`;
-            window.open(viewUrl, '_blank');
-            
-            showAlert(`Opening ${originalName || filename} in new tab...`, 'success');
+            try {
+                showAlert('Opening file from Notion...', 'success');
+                
+                // Direct redirect to view endpoint which will handle processing states
+                const viewUrl = `/api/view/${recordId}`;
+                window.open(viewUrl, '_blank');
+                
+            } catch (error) {
+                console.error('View error:', error);
+                showAlert('Failed to view file. Please try again.', 'error');
+            }
         }
 
-        // Authentication functions
+        // Authentication functions (unchanged)
         async function register() {
             console.log('✅ Register function called');
             
@@ -384,8 +421,8 @@
                     return;
                 }
                 
-                if (notesFile.size > 10 * 1024 * 1024) { // 10MB limit
-                    showAlert('File size must be less than 10MB', 'error');
+                if (notesFile.size > 20 * 1024 * 1024) { // 20MB limit for Notion
+                    showAlert('File size must be less than 20MB for Notion upload', 'error');
                     return;
                 }
             }
@@ -404,6 +441,7 @@
             
             if (notesFile) {
                 formData.append('notesFile', notesFile);
+                showAlert('📤 Uploading file to Notion... This may take a moment.', 'success');
             }
 
             try {
@@ -420,7 +458,19 @@
                 }
 
                 const result = await response.json();
-                showAlert(result.message, result.success ? 'success' : 'error');
+                
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    
+                    // Show additional info if file was uploaded
+                    if (result.recordInfo && result.recordInfo.hasFile) {
+                        setTimeout(() => {
+                            showAlert('✅ File successfully stored in Notion! It may take a few moments to be available for download.', 'success');
+                        }, 2000);
+                    }
+                } else {
+                    showAlert(result.message, 'error');
+                }
 
                 if (result.success) {
                     // Clear form
@@ -432,7 +482,11 @@
                 }
             } catch (error) {
                 console.error('Add record error:', error);
-                showAlert('Failed to add record. Please try again.', 'error');
+                if (notesFile) {
+                    showAlert('Failed to upload file to Notion. Please check your internet connection and try again.', 'error');
+                } else {
+                    showAlert('Failed to add record. Please try again.', 'error');
+                }
             } finally {
                 isLoading = false;
                 setLoadingState(addBtn, false);
@@ -466,7 +520,7 @@
 
         async function clearRecords() {
             // Double confirmation for destructive action
-            if (!confirm('⚠️ ARE YOU SURE?\n\nThis will permanently delete ALL records and uploaded files.\nThis action CANNOT be undone!')) {
+            if (!confirm('⚠️ ARE YOU SURE?\n\nThis will permanently delete ALL records.\nFiles will remain in Notion but won\'t be linked.\nThis action CANNOT be undone!')) {
                 return;
             }
 
@@ -504,7 +558,7 @@
             }
         }
 
-        // Update the records table with data - IMPROVED for file handling
+        // Update the records table with data - UPDATED for Notion integration
         function updateRecordsTable(records) {
             const tbody = document.querySelector('#recordsTable tbody');
             
@@ -528,7 +582,7 @@
                 const row = document.createElement('tr');
                 
                 // Extract all the data from the record
-                const [id, dateTime, department, userID, fileDisplay, syllabusText, downloadUrl, viewUrl, storedFileName] = record;
+                const [id, dateTime, department, userID, fileDisplay, syllabusText, recordId, hasFile] = record;
                 
                 // ID
                 const idTd = document.createElement('td');
@@ -559,12 +613,12 @@
                 userIDTd.textContent = userID || '';
                 row.appendChild(userIDTd);
                 
-                // Notes file - IMPROVED display
+                // Notes file - UPDATED for Notion
                 const fileTd = document.createElement('td');
                 if (fileDisplay) {
-                    fileTd.innerHTML = fileDisplay;
+                    fileTd.innerHTML = fileDisplay + ' <span style="color: #007bff; font-size: 0.8em;">[Notion]</span>';
                     fileTd.style.color = '#007bff';
-                    fileTd.title = 'File available for download/view';
+                    fileTd.title = 'File stored in Notion - use buttons to access';
                 } else {
                     fileTd.textContent = '';
                 }
@@ -580,25 +634,30 @@
                 }
                 row.appendChild(syllabusTd);
                 
-                // Actions - NEW! Download and View buttons
+                // Actions - UPDATED for Notion integration with better status handling
                 const actionsTd = document.createElement('td');
-                if (storedFileName) {
+                if (hasFile && recordId) {
                     const downloadBtn = document.createElement('button');
                     downloadBtn.innerHTML = '📥';
-                    downloadBtn.title = 'Download file';
+                    downloadBtn.title = 'Download from Notion (may take a moment if file is still processing)';
                     downloadBtn.className = 'btn btn-sm btn-primary';
                     downloadBtn.style.cssText = 'margin: 2px; padding: 4px 8px; font-size: 12px; border: none; border-radius: 4px; background: #007bff; color: white; cursor: pointer;';
-                    downloadBtn.onclick = () => downloadFile(storedFileName, extractOriginalName(fileDisplay));
+                    downloadBtn.onclick = () => downloadFile(recordId, extractOriginalName(fileDisplay));
                     
                     const viewBtn = document.createElement('button');
                     viewBtn.innerHTML = '👁️';
-                    viewBtn.title = 'View file';
+                    viewBtn.title = 'View in Notion (opens in new tab)';
                     viewBtn.className = 'btn btn-sm btn-secondary';
                     viewBtn.style.cssText = 'margin: 2px; padding: 4px 8px; font-size: 12px; border: none; border-radius: 4px; background: #6c757d; color: white; cursor: pointer;';
-                    viewBtn.onclick = () => viewFile(storedFileName, extractOriginalName(fileDisplay));
+                    viewBtn.onclick = () => viewFile(recordId, extractOriginalName(fileDisplay));
                     
                     actionsTd.appendChild(downloadBtn);
                     actionsTd.appendChild(viewBtn);
+                    
+                    // Add a small note about Notion processing
+                    const noteSpan = document.createElement('div');
+                    noteSpan.innerHTML = '<small style="color: #6c757d; font-size: 0.7em;">Notion file</small>';
+                    actionsTd.appendChild(noteSpan);
                 } else {
                     actionsTd.innerHTML = '<span style="color: #6c757d; font-style: italic;">No file</span>';
                 }
@@ -613,10 +672,10 @@
             if (!fileDisplay) return '';
             // Remove the emoji and size info to get just the filename
             const match = fileDisplay.match(/📄 (.+?) \(/);
-            return match ? match[1] : fileDisplay.replace('📄 ', '');
+            return match ? match[1] : fileDisplay.replace('📄 ', '').replace(' [Notion]', '');
         }
 
-        // Navigation functions
+        // Navigation functions (unchanged)
         function showLogin() {
             console.log('Showing login screen');
             hideAllContainers();
@@ -651,7 +710,7 @@
             
             // Welcome message
             if (currentUser) {
-                showAlert(`Welcome back, ${currentUser}! 🎉`, 'success');
+                showAlert(`Welcome back, ${currentUser}! Files will be stored in Notion. 🎉`, 'success');
             }
         }
 
@@ -706,7 +765,7 @@
 
         // Initialize app when DOM is loaded
         function initializeApp() {
-            console.log('🎯 Initializing app...');
+            console.log('🎯 Initializing app with Notion integration...');
             
             // Add event listeners to buttons
             const loginBtn = document.getElementById('loginBtn');
@@ -733,7 +792,7 @@
             // Show initial login screen
             showLogin();
             
-            console.log('✅ App initialized successfully!');
+            console.log('✅ App initialized successfully with Notion integration!');
         }
 
         // Wait for DOM to be ready
@@ -749,7 +808,7 @@
             showAlert('An unexpected error occurred. Please refresh the page and try again.', 'error');
         });
 
-        console.log('✅ JavaScript loaded successfully!');
+        console.log('✅ JavaScript loaded successfully with Notion integration!');
     </script>
 </body>
 </html>
