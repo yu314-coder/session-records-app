@@ -1,7 +1,7 @@
 {
   "name": "session-records-app",
-  "version": "1.0.0",
-  "description": "Session Records Management System with Notion integration",
+  "version": "2.0.0",
+  "description": "Session Records Management System with Notion integration and file upload",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -16,7 +16,9 @@
     "bcrypt": "^5.1.1",
     "express-session": "^1.17.3",
     "body-parser": "^1.20.2",
-    "path": "^0.12.7"
+    "path": "^0.12.7",
+    "form-data": "^4.0.0",
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
