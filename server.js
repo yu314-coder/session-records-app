@@ -79,8 +79,8 @@ async function uploadFileToNotion(filePath, originalFilename) {
   try {
     console.log('📤 Starting Notion file upload for:', originalFilename);
 
-    // Step 1: Create file upload in Notion
-    const createUploadResponse = await fetch('https://api.notion.com/v1/files', {
+    // Step 1: Create file upload in Notion (FIXED ENDPOINT)
+    const createUploadResponse = await fetch('https://api.notion.com/v1/file_uploads', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
@@ -88,7 +88,7 @@ async function uploadFileToNotion(filePath, originalFilename) {
         'Notion-Version': '2022-06-28'
       },
       body: JSON.stringify({
-        name: originalFilename
+        filename: originalFilename
       })
     });
 
@@ -99,6 +99,7 @@ async function uploadFileToNotion(filePath, originalFilename) {
 
     const uploadData = await createUploadResponse.json();
     console.log('✅ File upload created with ID:', uploadData.id);
+    console.log('📍 Upload URL:', uploadData.upload_url);
 
     // Step 2: Upload file content to Notion's upload URL
     const fileBuffer = await fs.readFile(filePath);
@@ -159,11 +160,26 @@ async function getNotionFileUrl(recordId) {
     const fileProperty = response.properties.NotionFile;
     if (fileProperty && fileProperty.files && fileProperty.files.length > 0) {
       const file = fileProperty.files[0];
-      return {
-        url: file.file.url,
-        expiryTime: file.file.expiry_time,
-        filename: file.name || 'file.pdf'
-      };
+      
+      // Handle both file_upload and file types
+      if (file.type === 'file_upload') {
+        // For file_upload type, we need to get the actual file info
+        // The file should transition to 'file' type after successful upload
+        console.log('⚠️ File is still in file_upload state, may need to wait or check status');
+        return {
+          url: null,
+          expiryTime: null,
+          filename: file.name || 'file.pdf',
+          isReady: false
+        };
+      } else if (file.type === 'file' && file.file) {
+        return {
+          url: file.file.url,
+          expiryTime: file.file.expiry_time,
+          filename: file.name || 'file.pdf',
+          isReady: true
+        };
+      }
     }
 
     return null;
@@ -199,6 +215,21 @@ app.get('/api/download/:recordId', async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'File not found or no longer available'
+      });
+    }
+
+    if (!fileInfo.isReady) {
+      return res.status(202).json({
+        success: false,
+        message: 'File is still being processed by Notion. Please try again in a few moments.',
+        processing: true
+      });
+    }
+
+    if (!fileInfo.url) {
+      return res.status(404).json({
+        success: false,
+        message: 'File URL not available. The file may have expired or been moved.'
       });
     }
 
@@ -244,6 +275,31 @@ app.get('/api/view/:recordId', async (req, res) => {
       });
     }
 
+    if (!fileInfo.isReady) {
+      return res.status(202).send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2>⏳ File Processing</h2>
+            <p>Your file is still being processed by Notion.</p>
+            <p>Please try again in a few moments.</p>
+            <button onclick="window.close()">Close</button>
+          </body>
+        </html>
+      `);
+    }
+
+    if (!fileInfo.url) {
+      return res.status(404).send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2>❌ File Not Available</h2>
+            <p>The file URL is not available. The file may have expired or been moved.</p>
+            <button onclick="window.close()">Close</button>
+          </body>
+        </html>
+      `);
+    }
+
     // Redirect to Notion's file URL for viewing
     res.redirect(fileInfo.url);
 
@@ -251,10 +307,15 @@ app.get('/api/view/:recordId', async (req, res) => {
 
   } catch (error) {
     console.error('💥 File view error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to view file. Please try again.' 
-    });
+    res.status(500).send(`
+      <html>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h2>💥 Error</h2>
+          <p>Failed to view file. Please try again.</p>
+          <button onclick="window.close()">Close</button>
+        </body>
+      </html>
+    `);
   }
 });
 
