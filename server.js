@@ -4,6 +4,8 @@ const session = require('express-session');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
+const FormData = require('form-data');
+const fetch = require('node-fetch');
 require('dotenv').config();
 
 const { Client } = require('@notionhq/client');
@@ -11,7 +13,7 @@ const { Client } = require('@notionhq/client');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-console.log('Starting Session Records App...');
+console.log('Starting Session Records App with Notion File Upload...');
 
 // Initialize Notion client
 const notion = new Client({
@@ -38,10 +40,10 @@ app.use(session({
 // Serve static files from public directory
 app.use(express.static('public'));
 
-// Configure multer for PDF file uploads
+// Configure multer for temporary file storage (before uploading to Notion)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/');
+    cb(null, 'temp/');
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -58,19 +60,118 @@ const upload = multer({
       cb(new Error('Only PDF files are allowed!'), false);
     }
   },
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit (Notion's limit for direct upload)
 });
 
-// Ensure uploads directory exists
-const ensureUploadsDir = async () => {
+// Ensure temp directory exists
+const ensureTempDir = async () => {
   try {
-    await fs.access('uploads');
-    console.log('Uploads directory exists');
+    await fs.access('temp');
+    console.log('Temp directory exists');
   } catch (error) {
-    await fs.mkdir('uploads', { recursive: true });
-    console.log('Created uploads directory');
+    await fs.mkdir('temp', { recursive: true });
+    console.log('Created temp directory');
   }
 };
+
+// Helper function to upload file to Notion
+async function uploadFileToNotion(filePath, originalFilename) {
+  try {
+    console.log('📤 Starting Notion file upload for:', originalFilename);
+
+    // Step 1: Create file upload in Notion
+    const createUploadResponse = await fetch('https://api.notion.com/v1/files', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+        'Content-Type': 'application/json',
+        'Notion-Version': '2022-06-28'
+      },
+      body: JSON.stringify({
+        name: originalFilename
+      })
+    });
+
+    if (!createUploadResponse.ok) {
+      const errorText = await createUploadResponse.text();
+      throw new Error(`Failed to create file upload: ${createUploadResponse.status} - ${errorText}`);
+    }
+
+    const uploadData = await createUploadResponse.json();
+    console.log('✅ File upload created with ID:', uploadData.id);
+
+    // Step 2: Upload file content to Notion's upload URL
+    const fileBuffer = await fs.readFile(filePath);
+    
+    const uploadFormData = new FormData();
+    uploadFormData.append('file', fileBuffer, {
+      filename: originalFilename,
+      contentType: 'application/pdf'
+    });
+
+    const uploadResponse = await fetch(uploadData.upload_url, {
+      method: 'POST',
+      body: uploadFormData
+    });
+
+    if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      throw new Error(`Failed to upload file content: ${uploadResponse.status} - ${errorText}`);
+    }
+
+    console.log('✅ File content uploaded to Notion successfully');
+
+    // Clean up temporary file
+    try {
+      await fs.unlink(filePath);
+      console.log('🗑️ Temporary file cleaned up');
+    } catch (error) {
+      console.log('⚠️ Could not clean up temp file:', error.message);
+    }
+
+    return {
+      fileUploadId: uploadData.id,
+      originalName: originalFilename,
+      success: true
+    };
+
+  } catch (error) {
+    console.error('💥 Notion file upload error:', error);
+    
+    // Clean up temporary file on error
+    try {
+      await fs.unlink(filePath);
+    } catch (cleanupError) {
+      console.log('⚠️ Could not clean up temp file after error:', cleanupError.message);
+    }
+
+    throw error;
+  }
+}
+
+// Helper function to get fresh file URL from Notion
+async function getNotionFileUrl(recordId) {
+  try {
+    const response = await notion.pages.retrieve({
+      page_id: recordId
+    });
+
+    const fileProperty = response.properties.NotionFile;
+    if (fileProperty && fileProperty.files && fileProperty.files.length > 0) {
+      const file = fileProperty.files[0];
+      return {
+        url: file.file.url,
+        expiryTime: file.file.expiry_time,
+        filename: file.name || 'file.pdf'
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error('💥 Error getting Notion file URL:', error);
+    return null;
+  }
+}
 
 // Routes
 
@@ -79,8 +180,8 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// File download endpoint - NEW!
-app.get('/api/download/:filename', async (req, res) => {
+// File download endpoint - Gets fresh URL from Notion
+app.get('/api/download/:recordId', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
       return res.status(401).json({ 
@@ -89,60 +190,40 @@ app.get('/api/download/:filename', async (req, res) => {
       });
     }
 
-    const filename = req.params.filename;
-    const filePath = path.join(__dirname, 'uploads', filename);
+    const recordId = req.params.recordId;
+    console.log('📥 Getting download URL for record:', recordId);
 
-    // Check if file exists
-    try {
-      await fs.access(filePath);
-    } catch (error) {
+    const fileInfo = await getNotionFileUrl(recordId);
+    
+    if (!fileInfo) {
       return res.status(404).json({
         success: false,
-        message: 'File not found'
+        message: 'File not found or no longer available'
       });
     }
 
-    // Get file stats
-    const stats = await fs.stat(filePath);
-    
-    // Find the record with this file to get original name
-    const records = await notion.databases.query({
-      database_id: RECORDS_DB_ID,
-      filter: {
-        property: 'StoredFileName',
-        rich_text: {
-          equals: filename,
-        },
-      },
+    // Return the fresh Notion URL for download
+    res.json({
+      success: true,
+      downloadUrl: fileInfo.url,
+      filename: fileInfo.filename,
+      expiryTime: fileInfo.expiryTime,
+      message: 'File URL retrieved successfully'
     });
 
-    let originalName = filename;
-    if (records.results.length > 0) {
-      originalName = records.results[0].properties.OriginalFileName?.rich_text?.[0]?.text?.content || filename;
-    }
-
-    // Set headers for file download
-    res.setHeader('Content-Disposition', `attachment; filename="${originalName}"`);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Length', stats.size);
-
-    // Stream the file
-    const fileStream = require('fs').createReadStream(filePath);
-    fileStream.pipe(res);
-
-    console.log('📥 File downloaded:', originalName, 'by user:', req.session.userID);
+    console.log('✅ File URL retrieved for download:', fileInfo.filename);
 
   } catch (error) {
     console.error('💥 File download error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to download file. Please try again.' 
+      message: 'Failed to get download URL. Please try again.' 
     });
   }
 });
 
-// File view endpoint (for viewing in browser) - NEW!
-app.get('/api/view/:filename', async (req, res) => {
+// File view endpoint - Gets fresh URL from Notion  
+app.get('/api/view/:recordId', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
       return res.status(401).json({ 
@@ -151,28 +232,22 @@ app.get('/api/view/:filename', async (req, res) => {
       });
     }
 
-    const filename = req.params.filename;
-    const filePath = path.join(__dirname, 'uploads', filename);
+    const recordId = req.params.recordId;
+    console.log('👁️ Getting view URL for record:', recordId);
 
-    // Check if file exists
-    try {
-      await fs.access(filePath);
-    } catch (error) {
+    const fileInfo = await getNotionFileUrl(recordId);
+    
+    if (!fileInfo) {
       return res.status(404).json({
         success: false,
-        message: 'File not found'
+        message: 'File not found or no longer available'
       });
     }
 
-    // Set headers for inline viewing
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline');
+    // Redirect to Notion's file URL for viewing
+    res.redirect(fileInfo.url);
 
-    // Stream the file
-    const fileStream = require('fs').createReadStream(filePath);
-    fileStream.pipe(res);
-
-    console.log('👁️ File viewed:', filename, 'by user:', req.session.userID);
+    console.log('✅ Redirecting to file view:', fileInfo.filename);
 
   } catch (error) {
     console.error('💥 File view error:', error);
@@ -253,7 +328,6 @@ app.post('/api/register', async (req, res) => {
 
     console.log('✅ User registered successfully:', userID);
     
-    // Return success with redirect instruction
     res.json({ 
       success: true, 
       message: 'Registration successful! Redirecting to login...',
@@ -388,7 +462,7 @@ app.post('/api/check-access-code', async (req, res) => {
   }
 });
 
-// Add record endpoint with IMPROVED file upload handling
+// Add record endpoint with Notion file upload
 app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
@@ -418,83 +492,83 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
       });
     }
 
-    // Prepare file information - IMPROVED!
-    let fileInfo = {
-      originalName: '',
-      storedName: '',
-      fileSize: 0,
-      fileUrl: '',
-      viewUrl: ''
+    let notionFileInfo = null;
+
+    // Upload file to Notion if provided
+    if (req.file) {
+      try {
+        console.log('📤 Uploading file to Notion:', req.file.originalname);
+        notionFileInfo = await uploadFileToNotion(req.file.path, req.file.originalname);
+      } catch (error) {
+        console.error('💥 Failed to upload file to Notion:', error);
+        return res.json({ 
+          success: false, 
+          message: 'Failed to upload file to Notion. Please try again.' 
+        });
+      }
+    }
+
+    // Prepare properties for Notion database
+    const properties = {
+      'ID': {
+        number: Date.now()
+      },
+      'DateTime': {
+        date: { start: dateTime }
+      },
+      'Department': {
+        select: { name: department }
+      },
+      'UserID': {
+        rich_text: [{ text: { content: req.session.userID } }]
+      },
+      'SyllabusText': {
+        rich_text: [{ text: { content: syllabusText || '' } }]
+      }
     };
 
-    if (req.file) {
-      fileInfo = {
-        originalName: req.file.originalname,
-        storedName: req.file.filename,
-        fileSize: req.file.size,
-        fileUrl: `/api/download/${req.file.filename}`,
-        viewUrl: `/api/view/${req.file.filename}`
+    // Add file information if uploaded
+    if (notionFileInfo) {
+      properties.NotionFile = {
+        files: [{
+          type: 'file_upload',
+          file_upload: {
+            id: notionFileInfo.fileUploadId
+          },
+          name: notionFileInfo.originalName
+        }]
+      };
+      
+      properties.OriginalFileName = {
+        rich_text: [{ text: { content: notionFileInfo.originalName } }]
+      };
+      
+      properties.FileSize = {
+        number: req.file.size
       };
     }
 
-    // Create record in Notion with IMPROVED file properties
-    await notion.pages.create({
+    // Create record in Notion
+    const record = await notion.pages.create({
       parent: { database_id: RECORDS_DB_ID },
-      properties: {
-        'ID': {
-          number: Date.now()
-        },
-        'DateTime': {
-          date: { start: dateTime }
-        },
-        'Department': {
-          select: { name: department }
-        },
-        'UserID': {
-          rich_text: [{ text: { content: req.session.userID } }]
-        },
-        // IMPROVED: Store original filename for display
-        'OriginalFileName': {
-          rich_text: [{ text: { content: fileInfo.originalName } }]
-        },
-        // IMPROVED: Store system filename for internal use
-        'StoredFileName': {
-          rich_text: [{ text: { content: fileInfo.storedName } }]
-        },
-        // IMPROVED: Store file size
-        'FileSize': {
-          number: fileInfo.fileSize
-        },
-        // IMPROVED: Store download URL
-        'FileDownloadURL': {
-          url: fileInfo.fileUrl || null
-        },
-        // IMPROVED: Store view URL
-        'FileViewURL': {
-          url: fileInfo.viewUrl || null
-        },
-        'SyllabusText': {
-          rich_text: [{ text: { content: syllabusText || '' } }]
-        }
-      },
+      properties: properties
     });
 
     // Update department counts
     await updateCounts(department);
 
-    console.log('✅ Record added successfully');
+    console.log('✅ Record added successfully with ID:', record.id);
     res.json({ 
       success: true, 
-      message: `Record added successfully! ${fileInfo.originalName ? `File "${fileInfo.originalName}" uploaded.` : ''}`,
+      message: `Record added successfully! ${notionFileInfo ? `File "${notionFileInfo.originalName}" uploaded to Notion.` : ''}`,
       recordInfo: {
+        recordId: record.id,
         department: department,
-        hasFile: !!req.file,
-        fileName: fileInfo.originalName,
-        fileSize: fileInfo.fileSize,
+        hasFile: !!notionFileInfo,
+        fileName: notionFileInfo?.originalName,
+        fileSize: req.file?.size,
         hasText: !!syllabusText,
-        timestamp: new Date().toLocaleString(),
-        downloadUrl: fileInfo.fileUrl,
-        viewUrl: fileInfo.viewUrl
+        timestamp: new Date().toLocaleString()
       }
     });
   } catch (error) {
@@ -506,7 +580,7 @@ app.post('/api/add-record', upload.single('notesFile'), async (req, res) => {
   }
 });
 
-// Get records endpoint with IMPROVED file information
+// Get records endpoint with Notion file information
 app.get('/api/records', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
@@ -531,17 +605,18 @@ app.get('/api/records', async (req, res) => {
     const formattedRecords = records.results.map(record => {
       const props = record.properties;
       
-      // IMPROVED: Better file display with download/view links
+      // Get file information from Notion
       const originalFileName = props.OriginalFileName?.rich_text?.[0]?.text?.content || '';
-      const storedFileName = props.StoredFileName?.rich_text?.[0]?.text?.content || '';
       const fileSize = props.FileSize?.number || 0;
-      const downloadUrl = props.FileDownloadURL?.url || '';
-      const viewUrl = props.FileViewURL?.url || '';
+      const notionFiles = props.NotionFile?.files || [];
       
       let fileDisplay = '';
-      if (originalFileName) {
+      let hasFile = false;
+      
+      if (originalFileName && notionFiles.length > 0) {
         const fileSizeKB = Math.round(fileSize / 1024);
         fileDisplay = `📄 ${originalFileName} (${fileSizeKB}KB)`;
+        hasFile = true;
       }
 
       return [
@@ -549,11 +624,10 @@ app.get('/api/records', async (req, res) => {
         props.DateTime?.date?.start || '',
         props.Department?.select?.name || '',
         props.UserID?.rich_text?.[0]?.text?.content || '',
-        fileDisplay, // Show original filename with size
+        fileDisplay,
         props.SyllabusText?.rich_text?.[0]?.text?.content || '',
-        downloadUrl, // Add download URL for frontend use
-        viewUrl, // Add view URL for frontend use
-        storedFileName // Add stored filename for internal use
+        record.id, // Record ID for file access
+        hasFile // Boolean to show/hide action buttons
       ];
     });
 
@@ -572,7 +646,7 @@ app.get('/api/records', async (req, res) => {
   }
 });
 
-// Clear records endpoint with admin password protection
+// Clear records endpoint
 app.post('/api/clear-records', async (req, res) => {
   try {
     if (!req.session.userID || !req.session.accessGranted) {
@@ -584,30 +658,15 @@ app.post('/api/clear-records', async (req, res) => {
 
     console.log('🗑️ Clear records attempt by user:', req.session.userID);
 
-    // Get all records first to clean up files
+    // Get all records
     const records = await notion.databases.query({
       database_id: RECORDS_DB_ID,
     });
 
     const recordCount = records.results.length;
 
-    // Clean up uploaded files
-    let filesDeleted = 0;
-    for (const record of records.results) {
-      const storedFileName = record.properties.StoredFileName?.rich_text?.[0]?.text?.content;
-      if (storedFileName) {
-        try {
-          const filePath = path.join(__dirname, 'uploads', storedFileName);
-          await fs.unlink(filePath);
-          filesDeleted++;
-          console.log('🗑️ Deleted file:', storedFileName);
-        } catch (error) {
-          console.log('⚠️ Could not delete file:', storedFileName, error.message);
-        }
-      }
-    }
-
     // Archive all records (Notion doesn't support bulk delete)
+    // Note: Files in Notion will remain but won't be accessible through these records
     for (const record of records.results) {
       await notion.pages.update({
         page_id: record.id,
@@ -631,17 +690,8 @@ app.post('/api/clear-records', async (req, res) => {
         'UserID': {
           rich_text: [{ text: { content: req.session.userID } }]
         },
-        'OriginalFileName': {
-          rich_text: [{ text: { content: '' } }]
-        },
-        'StoredFileName': {
-          rich_text: [{ text: { content: '' } }]
-        },
-        'FileSize': {
-          number: 0
-        },
         'SyllabusText': {
-          rich_text: [{ text: { content: `ADMIN CLEAR: ${recordCount} records and ${filesDeleted} files cleared by ${req.session.userID} at ${new Date().toLocaleString()}` } }]
+          rich_text: [{ text: { content: `ADMIN CLEAR: ${recordCount} records cleared by ${req.session.userID} at ${new Date().toLocaleString()}. Files remain in Notion but are no longer linked.` } }]
         }
       },
     });
@@ -652,9 +702,8 @@ app.post('/api/clear-records', async (req, res) => {
     console.log('✅ All records cleared successfully by:', req.session.userID);
     res.json({ 
       success: true, 
-      message: `Successfully cleared ${recordCount} records and ${filesDeleted} files from the system.`,
+      message: `Successfully cleared ${recordCount} records. Files remain in Notion storage.`,
       clearedCount: recordCount,
-      filesDeleted: filesDeleted,
       clearedBy: req.session.userID,
       clearedAt: new Date().toLocaleString()
     });
@@ -728,9 +777,9 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ 
     success: true, 
-    message: 'Session Records Management System is running', 
+    message: 'Session Records Management System with Notion File Upload is running', 
     timestamp: new Date().toISOString(),
-    version: '1.0.0',
+    version: '2.0.0',
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development'
   });
@@ -751,7 +800,6 @@ async function updateCounts(department) {
   try {
     console.log('📊 Updating counts for department:', department);
 
-    // Get existing counts for this department
     const counts = await notion.databases.query({
       database_id: COUNTS_DB_ID,
       filter: {
@@ -763,7 +811,6 @@ async function updateCounts(department) {
     });
 
     if (counts.results.length > 0) {
-      // Update existing count
       const existingCount = counts.results[0];
       const currentCount = existingCount.properties.Count?.number || 0;
       
@@ -778,7 +825,6 @@ async function updateCounts(department) {
       
       console.log('✅ Updated count for', department, 'to', currentCount + 1);
     } else {
-      // Create new count entry
       await notion.pages.create({
         parent: { database_id: COUNTS_DB_ID },
         properties: {
@@ -840,11 +886,11 @@ app.use((req, res) => {
 
 // Start server
 app.listen(PORT, async () => {
-  await ensureUploadsDir();
-  console.log(`\n🚀 SESSION RECORDS MANAGEMENT SYSTEM`);
+  await ensureTempDir();
+  console.log(`\n🚀 SESSION RECORDS MANAGEMENT SYSTEM WITH NOTION FILE UPLOAD`);
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`🌐 Local URL: http://localhost:${PORT}`);
-  console.log(`📚 Ready to manage session records!`);
+  console.log(`📚 Files uploaded directly to Notion!`);
   console.log(`⏰ Started at: ${new Date().toLocaleString()}\n`);
 });
 
