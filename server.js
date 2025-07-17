@@ -112,6 +112,11 @@ async function uploadFileToNotion(filePath, originalFilename) {
 
     const uploadResponse = await fetch(uploadData.upload_url, {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+        'Notion-Version': '2022-06-28'
+        // Don't set Content-Type - let FormData handle it with boundary
+      },
       body: uploadFormData
     });
 
