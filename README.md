@@ -3,6 +3,11 @@
 Tutor session records with user accounts, access codes, PDF notes upload, and
 Notion sync — hosted **100% free on GitHub Pages**, with no server to run.
 
+**▶ Live app: https://yu314-coder.github.io/session-records-app/**
+
+*Deployed and working. The setup steps below are kept for reference / redeploying
+from scratch — they have already been completed for the live instance.*
+
 ```mermaid
 flowchart LR
     A[GitHub Pages<br>static site in /docs] -->|JSON over HTTPS| B[Google Apps Script<br>web app]
