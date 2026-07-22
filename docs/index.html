@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Records Management System</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+</head>
+<body>
+    <!-- Alerts (visible on every screen) -->
+    <div id="alertContainer"></div>
+
+    <!-- Login Container -->
+    <div id="loginContainer" class="container">
+        <h2>Login</h2>
+        <div class="form-group">
+            <label for="loginUserID">User ID:</label>
+            <input type="text" id="loginUserID" required>
+        </div>
+        <div class="form-group">
+            <label for="loginPassword">Password:</label>
+            <input type="password" id="loginPassword" required>
+        </div>
+        <div class="button-group">
+            <button type="button" id="loginBtn">Login</button>
+            <button type="button" id="showRegisterBtn" class="secondary">Register</button>
+        </div>
+    </div>
+
+    <!-- Register Container -->
+    <div id="registerContainer" class="container hidden">
+        <h2>Register</h2>
+        <div class="form-group">
+            <label for="regUserID">UserID:</label>
+            <input type="text" id="regUserID" required>
+        </div>
+        <div class="form-group">
+            <label for="regPassword">Password:</label>
+            <input type="password" id="regPassword" required>
+        </div>
+        <div class="button-group">
+            <button type="button" id="registerBtn">Register</button>
+            <button type="button" id="showLoginBtn" class="secondary">Back to Login</button>
+        </div>
+    </div>
+
+    <!-- Access Code Container -->
+    <div id="accessCodeContainer" class="container hidden">
+        <h2>Enter Access Code</h2>
+        <div class="form-group">
+            <label for="accessCode">Access Code:</label>
+            <input type="text" id="accessCode" required>
+        </div>
+        <div class="button-group">
+            <button type="button" id="checkAccessBtn">Submit</button>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <div id="appContainer" class="container hidden">
+        <h1>Session Records Management</h1>
+
+        <div class="form-group">
+            <label for="department">Select Department:</label>
+            <select id="department">
+                <option value="Chinese">Chinese</option>
+                <option value="Biology">Biology</option>
+                <option value="Math">Math</option>
+                <option value="Other">Other</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="notesFile">Upload Notes (PDF):</label>
+            <input type="file" id="notesFile" accept=".pdf">
+            <small style="color: #6c757d; font-size: 0.85em; margin-top: 5px; display: block;">
+                📄 Supported: PDF files only, max 20MB (stored in Google Drive, synced to Notion)
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="syllabusText">Enter Syllabus Text:</label>
+            <textarea id="syllabusText" placeholder="Enter Syllabus Text" rows="4"></textarea>
+        </div>
+
+        <div class="button-group">
+            <button type="button" id="addRecordBtn">Add Record</button>
+            <button type="button" id="clearRecordsBtn" class="danger">Clear All Records</button>
+            <button type="button" id="refreshRecordsBtn" class="secondary">Refresh</button>
+            <button type="button" id="logoutBtn" class="secondary">Logout</button>
+        </div>
+
+        <div id="recordsContainer">
+            <h3>Records History</h3>
+            <p style="color: #6c757d; font-size: 0.9em; margin-bottom: 15px;">
+                📁 Records live in Google Sheets and sync to Notion; files are stored in Google Drive
+            </p>
+            <table id="recordsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>DateTime</th>
+                        <th>Department</th>
+                        <th>User ID</th>
+                        <th>Notes File</th>
+                        <th>Syllabus Text</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Records will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
