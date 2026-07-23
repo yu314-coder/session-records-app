@@ -3,7 +3,7 @@
 Tutor session records with user accounts, access codes, PDF notes upload, and
 Notion sync — hosted **100% free on GitHub Pages**, with no server to run.
 
-**▶ Live app: https://yu314-coder.github.io/session-records-app/**
+**▶ Live app: https://yu314-coder.github.io/records/**
 
 *Deployed and working, with Notion sync enabled and the full history migrated
 across from the old Render app (users, access code, counts, 16 records and their
@@ -73,7 +73,7 @@ Without these properties the app runs on Sheets + Drive only.
 
 2. Commit and push, then enable Pages: repo **Settings → Pages →
    Deploy from a branch → `main` / `docs`**.
-3. Open `https://<your-username>.github.io/session-records-app/` — done.
+3. Open `https://<your-username>.github.io/<repo-name>/` — done.
 
 ## How it works
 
