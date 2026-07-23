@@ -50,6 +50,7 @@ In the Apps Script editor, open **Project Settings → Script Properties** and a
 |---|---|
 | `NOTION_API_KEY` | your Notion integration token |
 | `NOTION_RECORDS_DB_ID` | the id of your Records database |
+| `NOTION_USERS_DB_ID` | the id of your Users database (enables Notion-backed login) |
 
 The Notion database must have the same properties as the original app:
 `ID` (number), `DateTime` (date), `Department` (select), `UserID` (rich text),
@@ -77,16 +78,23 @@ Without these properties the app runs on Sheets + Drive only.
 
 ## How it works
 
-- **Auth** — passwords are salted and hashed (iterated SHA-256) in the
-  `Users` tab; an improvement over the old server, which stored them in plain
-  text. Login returns a random token (24h lifetime, `Sessions` tab) that the
-  browser keeps in `localStorage`.
+- **Auth** — register and login read/write the **Notion Users database**
+  directly, so accounts are managed in Notion (passwords are stored there in
+  plain text, as the original app did — treat that database as sensitive). If
+  `NOTION_USERS_DB_ID` is unset, it falls back to the Sheet's `Users` tab with
+  salted SHA-256 hashes. There are no length rules: any non-empty UserID and
+  password are accepted. Login returns a random token (24h lifetime,
+  `Sessions` tab) that the browser keeps in `localStorage`.
 - **Access codes** — checked against the `AccessCodes` tab after login, same
   gate as before.
 - **Records** — appended to the `Records` tab, then mirrored to Notion by the
   script (the Notion page id is stored back in the row). "Clear All Records"
   moves rows to `RecordsArchive`, archives the synced Notion pages, resets
   `Counts`, and leaves an audit row — matching the original behavior.
+- **Counts** — tracked per calendar year *and* department (`Year | Department |
+  Count`), so 2025 and 2026 totals stay separate, and shown as "Session Totals"
+  above the records table. `rebuildCounts()` recomputes the tab from Records at
+  any time.
 - **Files** — PDFs (max 20MB) are stored in a Drive folder
   (*Session Records Files*, link-viewable) **and** uploaded into the Notion
   record. View/download buttons link straight to Drive, so files never expire
