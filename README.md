@@ -5,8 +5,10 @@ Notion sync — hosted **100% free on GitHub Pages**, with no server to run.
 
 **▶ Live app: https://yu314-coder.github.io/session-records-app/**
 
-*Deployed and working. The setup steps below are kept for reference / redeploying
-from scratch — they have already been completed for the live instance.*
+*Deployed and working, with Notion sync enabled and the full history migrated
+across from the old Render app (users, access code, counts, 16 records and their
+PDFs). The setup steps below are kept for reference / redeploying from scratch —
+they have already been completed for the live instance.*
 
 ```mermaid
 flowchart LR
