@@ -74,16 +74,9 @@ async function register() {
     const password = document.getElementById('regPassword').value;
     const registerBtn = document.getElementById('registerBtn');
 
+    // No length rules — any non-empty UserID and password are accepted.
     if (!userID || !password) {
         showAlert('Please fill in all fields', 'error');
-        return;
-    }
-    if (userID.length < 3) {
-        showAlert('User ID must be at least 3 characters long', 'error');
-        return;
-    }
-    if (password.length < 6) {
-        showAlert('Password must be at least 6 characters long', 'error');
         return;
     }
 

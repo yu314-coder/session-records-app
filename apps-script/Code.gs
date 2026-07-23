@@ -106,18 +106,24 @@ function register_(req) {
   var userID = String(req.userID || '').trim();
   var password = String(req.password || '');
 
+  // No length rules on purpose — any non-empty UserID and password are accepted.
   if (!userID || !password) return { success: false, message: 'UserID and password are required' };
-  if (userID.length < 3) return { success: false, message: 'UserID must be at least 3 characters long' };
-  if (password.length < 6) return { success: false, message: 'Password must be at least 6 characters long' };
 
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    if (findRow_(SHEETS.USERS, 0, userID)) {
-      return { success: false, message: 'UserID already registered. Please choose a different UserID.' };
+    if (notionUsersEnabled_()) {
+      if (notionFindUser_(userID)) {
+        return { success: false, message: 'UserID already registered. Please choose a different UserID.' };
+      }
+      notionCreateUser_(userID, password);
+    } else {
+      if (findRow_(SHEETS.USERS, 0, userID)) {
+        return { success: false, message: 'UserID already registered. Please choose a different UserID.' };
+      }
+      var salt = Utilities.getUuid();
+      sheet_(SHEETS.USERS).appendRow([userID, hashPassword_(password, salt), salt, new Date().toISOString()]);
     }
-    var salt = Utilities.getUuid();
-    sheet_(SHEETS.USERS).appendRow([userID, hashPassword_(password, salt), salt, new Date().toISOString()]);
   } finally {
     lock.releaseLock();
   }
@@ -135,13 +141,20 @@ function login_(req) {
 
   if (!userID || !password) return { success: false, message: 'UserID and password are required' };
 
-  var hit = findRow_(SHEETS.USERS, 0, userID);
-  if (!hit) return { success: false, message: 'User not found. Please check your UserID or register first.' };
-
-  var storedHash = String(hit.row[1]);
-  var salt = String(hit.row[2]);
-  if (hashPassword_(password, salt) !== storedHash) {
-    return { success: false, message: 'Invalid password. Please check your password and try again.' };
+  if (notionUsersEnabled_()) {
+    // Accounts live in the Notion Users database (passwords stored as-is there).
+    var nUser = notionFindUser_(userID);
+    if (!nUser) return { success: false, message: 'User not found. Please check your UserID or register first.' };
+    if (nUser.password !== password) {
+      return { success: false, message: 'Invalid password. Please check your password and try again.' };
+    }
+  } else {
+    // Fallback when Notion is not configured: the Sheet's Users tab (salted hashes).
+    var hit = findRow_(SHEETS.USERS, 0, userID);
+    if (!hit) return { success: false, message: 'User not found. Please check your UserID or register first.' };
+    if (hashPassword_(password, String(hit.row[2])) !== String(hit.row[1])) {
+      return { success: false, message: 'Invalid password. Please check your password and try again.' };
+    }
   }
 
   purgeExpiredSessions_();
@@ -398,6 +411,75 @@ function notionHeaders_() {
     'Authorization': 'Bearer ' + PropertiesService.getScriptProperties().getProperty('NOTION_API_KEY'),
     'Notion-Version': NOTION_VERSION
   };
+}
+
+// ── Notion-backed user accounts ──────────────────────────────────────────────
+// Register/login read and write the Notion Users database directly, so accounts
+// are managed in Notion rather than copied into the Sheet. Passwords are stored
+// there in plain text, matching how the original app wrote them — anyone with
+// access to that database can read them.
+
+function notionUsersEnabled_() {
+  var props = PropertiesService.getScriptProperties();
+  return !!(props.getProperty('NOTION_API_KEY') && props.getProperty('NOTION_USERS_DB_ID'));
+}
+
+/** Looks up one user by UserID. Returns {pageId, userID, password} or null. */
+function notionFindUser_(userID) {
+  var dbId = PropertiesService.getScriptProperties().getProperty('NOTION_USERS_DB_ID');
+  var resp = UrlFetchApp.fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: notionHeaders_(),
+    payload: JSON.stringify({
+      filter: { property: 'UserID', title: { equals: userID } },
+      page_size: 1
+    }),
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() >= 300) {
+    throw new Error('Notion user lookup failed: ' + resp.getContentText());
+  }
+  var results = JSON.parse(resp.getContentText()).results;
+  if (!results.length) return null;
+  var page = results[0];
+  return {
+    pageId: page.id,
+    userID: notionTitleText_(page, 'UserID'),
+    password: notionRichText_(page, 'Password')
+  };
+}
+
+function notionCreateUser_(userID, password) {
+  var dbId = PropertiesService.getScriptProperties().getProperty('NOTION_USERS_DB_ID');
+  var resp = UrlFetchApp.fetch('https://api.notion.com/v1/pages', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: notionHeaders_(),
+    payload: JSON.stringify({
+      parent: { database_id: dbId },
+      properties: {
+        'UserID': { title: [{ text: { content: userID } }] },
+        'Password': { rich_text: [{ text: { content: password } }] }
+      }
+    }),
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() >= 300) {
+    throw new Error('Notion user create failed: ' + resp.getContentText());
+  }
+  return JSON.parse(resp.getContentText()).id;
+}
+
+function notionTitleText_(page, name) {
+  var prop = page.properties[name];
+  return prop && prop.title && prop.title.length ? prop.title[0].plain_text : '';
+}
+
+function notionRichText_(page, name) {
+  var prop = page.properties[name];
+  if (!prop || !prop.rich_text) return '';
+  return prop.rich_text.map(function (t) { return t.plain_text; }).join('');
 }
 
 /** Creates the record page in Notion, uploading the PDF into Notion as well. */
