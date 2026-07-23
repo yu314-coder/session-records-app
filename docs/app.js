@@ -280,6 +280,70 @@ async function refreshRecords() {
         console.error('Refresh records error:', error);
         showAlert('Failed to load records. Please check your connection.', 'error');
     }
+    refreshCounts();
+}
+
+// Session totals, one block per year (newest first), split by department
+async function refreshCounts() {
+    try {
+        const result = await api('counts');
+        if (result.success) updateCountsDisplay(result.data);
+    } catch (error) {
+        console.error('Refresh counts error:', error);
+    }
+}
+
+function updateCountsDisplay(counts) {
+    const container = document.getElementById('countsContainer');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!counts || counts.length === 0) return;
+
+    const heading = document.createElement('h3');
+    heading.textContent = 'Session Totals';
+    container.appendChild(heading);
+
+    const years = [...new Set(counts.map(c => c.year))].sort().reverse();
+
+    years.forEach(year => {
+        const rows = counts
+            .filter(c => c.year === year)
+            .sort((a, b) => a.department.localeCompare(b.department));
+
+        const block = document.createElement('div');
+        block.className = 'counts-year';
+
+        const label = document.createElement('div');
+        label.className = 'counts-year-label';
+        label.textContent = year;
+
+        const total = document.createElement('span');
+        total.className = 'counts-total';
+        total.textContent = `${rows.reduce((sum, c) => sum + c.count, 0)} sessions`;
+        label.appendChild(total);
+        block.appendChild(label);
+
+        const items = document.createElement('div');
+        items.className = 'counts-items';
+        rows.forEach(c => {
+            const tile = document.createElement('div');
+            tile.className = 'counts-item';
+
+            const dept = document.createElement('span');
+            dept.className = 'counts-dept';
+            dept.textContent = c.department;      // textContent, never innerHTML
+
+            const num = document.createElement('span');
+            num.className = 'counts-num';
+            num.textContent = c.count;
+
+            tile.appendChild(num);
+            tile.appendChild(dept);
+            items.appendChild(tile);
+        });
+        block.appendChild(items);
+        container.appendChild(block);
+    });
 }
 
 async function clearRecords() {

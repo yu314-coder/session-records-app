@@ -42,7 +42,7 @@ var HEADERS = {
   AccessCodes: ['AccessCode', 'Note'],
   Records: ['ID', 'DateTime', 'Department', 'UserID', 'FileName', 'FileSize', 'DriveFileId', 'SyllabusText', 'NotionPageId', 'NotionSyncError'],
   RecordsArchive: ['ID', 'DateTime', 'Department', 'UserID', 'FileName', 'FileSize', 'DriveFileId', 'SyllabusText', 'NotionPageId', 'ArchivedAt', 'ArchivedBy'],
-  Counts: ['Department', 'Count'],
+  Counts: ['Year', 'Department', 'Count'],
   Sessions: ['Token', 'UserID', 'AccessGranted', 'CreatedAt']
 };
 
@@ -263,7 +263,7 @@ function addRecord_(req) {
     }
   }
 
-  updateCounts_(department);
+  updateCounts_(department, record.dateTime);
 
   return {
     success: true,
@@ -370,26 +370,73 @@ function getCounts_(req) {
   if (!session) return { success: false, message: 'Not authenticated. Please login first.' };
 
   var data = dataRows_(SHEETS.COUNTS).map(function (row) {
-    return { department: String(row[0] || ''), count: Number(row[1]) || 0 };
+    return {
+      year: String(row[0] || ''),
+      department: String(row[1] || ''),
+      count: Number(row[2]) || 0
+    };
+  });
+  // Newest year first, then department A→Z.
+  data.sort(function (a, b) {
+    if (a.year !== b.year) return b.year.localeCompare(a.year);
+    return a.department.localeCompare(b.department);
   });
   return { success: true, data: data, totalDepartments: data.length };
 }
 
 // ── Counts helpers ───────────────────────────────────────────────────────────
 
-function updateCounts_(department) {
+/** Counts are tracked per calendar year AND department, e.g. 2025/Chinese. */
+function updateCounts_(department, dateTime) {
+  var year = countYear_(dateTime);
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var hit = findRow_(SHEETS.COUNTS, 0, department);
-    if (hit) {
-      sheet_(SHEETS.COUNTS).getRange(hit.rowIndex, 2).setValue((Number(hit.row[1]) || 0) + 1);
-    } else {
-      sheet_(SHEETS.COUNTS).appendRow([department, 1]);
+    var countsSheet = sheet_(SHEETS.COUNTS);
+    var rows = dataRows_(SHEETS.COUNTS);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]) === year && String(rows[i][1]) === department) {
+        countsSheet.getRange(i + 2, 3).setValue((Number(rows[i][2]) || 0) + 1);
+        return;
+      }
     }
+    countsSheet.appendRow([year, department, 1]);
   } finally {
     lock.releaseLock();
   }
+}
+
+function countYear_(dateTime) {
+  var d = new Date(isoString_(dateTime));
+  return isNaN(d.getTime()) ? String(new Date().getFullYear()) : String(d.getFullYear());
+}
+
+/**
+ * Recomputes the whole Counts tab from the Records tab. Run it from the editor
+ * after changing the schema, or any time the totals look off — Records is the
+ * source of truth, so this can always be re-run safely.
+ */
+function rebuildCounts() {
+  var tally = {};
+  dataRows_(SHEETS.RECORDS).forEach(function (row) {
+    var department = String(row[2] || '');
+    if (!department || department === 'System') return;   // skip audit rows
+    var key = countYear_(row[1]) + ' ' + department;
+    tally[key] = (tally[key] || 0) + 1;
+  });
+
+  var countsSheet = sheet_(SHEETS.COUNTS);
+  countsSheet.clear();
+  countsSheet.appendRow(HEADERS.Counts);
+  countsSheet.setFrozenRows(1);
+
+  Object.keys(tally).sort().reverse().forEach(function (key) {
+    var parts = key.split(' ');
+    countsSheet.appendRow([parts[0], parts[1], tally[key]]);
+  });
+
+  Logger.log('Counts rebuilt from ' + dataRows_(SHEETS.RECORDS).length + ' records: ' +
+    Object.keys(tally).map(function (k) { return k.replace(' ', '/') + '=' + tally[k]; }).sort().join(', '));
 }
 
 function clearCounts_() {
